@@ -27,6 +27,20 @@ function chunk<T>(arr: T[], n: number): T[][] {
   return out;
 }
 
+// Turso occasionally returns transient 5xx/404s under load — retry with backoff.
+async function withRetry<T>(fn: () => Promise<T>, tries = 6): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 // Copy one table using a delegate pair. `batch` = rows per INSERT (keep rows*cols < ~900).
 async function copyTable<Row>(
   name: string,
@@ -50,7 +64,7 @@ async function copyTable<Row>(
   for (let skip = destCount; skip < total; skip += page) {
     const rows = await read(skip, page);
     for (const part of chunk(rows, batch)) {
-      await write(part);
+      await withRetry(() => write(part));
     }
     done += rows.length;
     process.stdout.write(`\r  ${name}: ${done}/${total}   `);

@@ -1,0 +1,10 @@
+# Never upload heavy local-only artifacts to Vercel (esp. via the CLI).
+prisma/backups
+prisma/dev.db
+prisma/dev.db-journal
+prisma/dev.db-wal
+prisma/dev.db-shm
+prisma/_legacy-json
+data/_raw
+*.db
+*.db-*

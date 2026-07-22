@@ -3,7 +3,7 @@ import { copyFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-const KEEP = 25; // most recent automatic backups to retain (each can be ~100 MB)
+const KEEP = 2; // most recent automatic backups to retain (each can be ~100 MB)
 
 /**
  * Copy the live SQLite DB into prisma/backups before any destructive write.
