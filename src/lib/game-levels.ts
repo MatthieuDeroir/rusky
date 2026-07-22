@@ -38,6 +38,16 @@ const TITLES = [
   "Легенда — légende", // 20
 ];
 
+// A coherent completion tier shared by every type's progress bar (0 → 100%).
+export function progressTier(pct: number): string {
+  if (pct <= 0) return "À découvrir";
+  if (pct < 25) return "Néophyte";
+  if (pct < 50) return "Initié";
+  if (pct < 75) return "Apprenti";
+  if (pct < 100) return "Confirmé";
+  return "Complet";
+}
+
 export function getLevel(totalXp: number): GameLevel {
   let i = 0;
   while (i + 1 < THRESHOLDS.length && totalXp >= THRESHOLDS[i + 1]) i++;

@@ -562,6 +562,52 @@ export async function getCoverage(userId: string): Promise<CoverageRow[]> {
   });
 }
 
+export interface TypeProgress {
+  type: WordType;
+  label: string;
+  words: number; // collected words of this type
+  vocabCollected: number; // distinct entries collected
+  vocabTotal: number; // entries of this type in the whole dictionary
+  vocabPct: number; // collected / total (dictionary coverage)
+  formsDiscovered: number; // paradigm cells filled across collected words of this type
+  formsTotal: number; // paradigm cells available across those words
+  formsPct: number; // discovered / total (declension/conjugation completion)
+}
+
+/**
+ * Per-type progress combining two axes: dictionary coverage (how much of all Russian words of
+ * this type you've collected) and paradigm completion (how many declension/conjugation forms of
+ * your collected words you've filled). Used by the home Progression and the Parcours page.
+ */
+export async function getTypeProgress(userId: string): Promise<TypeProgress[]> {
+  const [coverage, collection] = await Promise.all([
+    getCoverage(userId),
+    getCollection(userId),
+  ]);
+  const byType = new Map<string, { words: number; fd: number; ft: number }>();
+  for (const it of collection) {
+    const g = byType.get(it.type) ?? { words: 0, fd: 0, ft: 0 };
+    g.words += 1;
+    g.fd += it.discovered;
+    g.ft += it.total;
+    byType.set(it.type, g);
+  }
+  return coverage.map((c) => {
+    const g = byType.get(c.type) ?? { words: 0, fd: 0, ft: 0 };
+    return {
+      type: c.type,
+      label: c.label,
+      words: g.words,
+      vocabCollected: c.collected,
+      vocabTotal: c.total,
+      vocabPct: c.pct,
+      formsDiscovered: g.fd,
+      formsTotal: g.ft,
+      formsPct: g.ft > 0 ? Math.round((g.fd / g.ft) * 1000) / 10 : 0,
+    };
+  });
+}
+
 /** Number of spaced-repetition forms currently due for this user (SRS "Réviser" queue). */
 export async function dueReviewCount(userId: string): Promise<number> {
   return prisma.formReview.count({

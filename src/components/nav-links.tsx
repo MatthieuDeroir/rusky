@@ -8,9 +8,9 @@ import { ChevronDown } from "lucide-react";
 // Tabs grouped into categories; multi-item categories open a dropdown, single-item ones are a
 // plain link. The "Ajouter" CTA is rendered separately (highlighted) after these.
 const NAV: { label: string; items: { href: string; label: string }[] }[] = [
-  { label: "Collection", items: [{ href: "/", label: "Collection" }] },
+  { label: "Accueil", items: [{ href: "/", label: "Accueil" }] },
   { label: "Parcours", items: [{ href: "/parcours", label: "Parcours" }] },
-  { label: "Exercices", items: [{ href: "/exercices", label: "Vue d’ensemble" }] },
+  { label: "Collection", items: [{ href: "/collection", label: "Ma collection" }] },
   {
     label: "Référence",
     items: [

@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Route, Dumbbell, Plus, BookOpen, GraduationCap, User } from "lucide-react";
+import { Home, Route, Library, Plus, BookOpen, GraduationCap, User } from "lucide-react";
 
 const ITEMS = [
   { href: "/", label: "Accueil", icon: Home, exact: true },
   { href: "/parcours", label: "Parcours", icon: Route },
-  { href: "/exercices", label: "Exercices", icon: Dumbbell },
+  { href: "/collection", label: "Collection", icon: Library },
   { href: "/add", label: "Ajouter", icon: Plus, central: true },
   { href: "/reference", label: "Référence", icon: BookOpen },
   { href: "/validation", label: "Validation", icon: GraduationCap },

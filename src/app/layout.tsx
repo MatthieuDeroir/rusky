@@ -4,6 +4,8 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { SiteChrome } from "@/components/site-chrome";
 import { UpdatePrompt } from "@/components/pwa/update-prompt";
+import { currentUserId } from "@/lib/auth";
+import { getGameStats } from "@/lib/xp";
 
 // Editorial pairing: Lora (literary serif, for Russian headwords/titles) + Onest (UI).
 const display = Lora({
@@ -38,16 +40,27 @@ export const viewport: Viewport = {
   themeColor: "#1c1813",
 };
 
-export default function RootLayout({
+async function headerStreak(): Promise<{ streak: number; freezes: number } | null> {
+  try {
+    const userId = await currentUserId();
+    const stats = await getGameStats(userId);
+    return { streak: stats.currentStreak, freezes: stats.streakFreezes };
+  } catch {
+    return null; // not signed in (e.g. /login) — no header stats
+  }
+}
+
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const streak = await headerStreak();
   return (
     <html
       lang="fr"
       className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <SiteChrome>{children}</SiteChrome>
+        <SiteChrome streak={streak}>{children}</SiteChrome>
         <UpdatePrompt />
         <Toaster position="top-center" richColors />
       </body>

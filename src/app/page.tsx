@@ -1,56 +1,30 @@
 import Link from "next/link";
-import { getCollection, dueReviewCount } from "@/lib/queries";
-import { CollectionView } from "@/components/collection-view";
-import { Milestones } from "@/components/milestones";
-import { CompletionProgress } from "@/components/completion-progress";
+import { ArrowRight } from "lucide-react";
+import { getCollection, getTypeProgress, dueReviewCount } from "@/lib/queries";
 import { GameDashboard } from "@/components/game-dashboard";
-import { getValidatedLevels } from "@/lib/level-store";
+import { HomeProgress } from "@/components/home-progress";
 import { currentUserId } from "@/lib/auth";
 import { getGameStats } from "@/lib/xp";
 import { Button } from "@/components/ui/button";
 
-const DECLINING = new Set(["noun", "adjective", "pronoun", "numeral"]);
-
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function HomePage() {
   const userId = await currentUserId();
-  const items = await getCollection(userId);
-  // Split paradigm completion into declension (noun-like) vs conjugation (verb) families.
-  const decl = { filled: 0, total: 0 };
-  const conj = { filled: 0, total: 0 };
-  let formsDiscovered = 0;
-  for (const i of items) {
-    formsDiscovered += i.discovered;
-    if (i.type === "verb") {
-      conj.filled += i.discovered;
-      conj.total += i.total;
-    } else if (DECLINING.has(i.type)) {
-      decl.filled += i.discovered;
-      decl.total += i.total;
-    }
-  }
-  const validated = await getValidatedLevels(userId);
-  const stats = await getGameStats(userId);
-  const due = await dueReviewCount(userId);
-
-  // "Continuer" targets the most useful next action: due reviews → incomplete words → add.
-  const anyIncomplete = items.some((i) => i.total > 0 && i.discovered < i.total);
-  const cont =
-    due > 0
-      ? { href: "/reviser", label: `Réviser (${due})` }
-      : anyIncomplete
-        ? { href: "/exercices", label: "S’entraîner" }
-        : { href: "/add", label: "Ajouter un mot" };
+  const [items, stats, progress, due] = await Promise.all([
+    getCollection(userId),
+    getGameStats(userId),
+    getTypeProgress(userId),
+    dueReviewCount(userId),
+  ]);
 
   if (items.length === 0) {
     return (
-      <div className="glass-strong mx-auto mt-10 max-w-xl rounded-3xl p-10 text-center">
-        <h1 className="text-2xl font-semibold">Ta collection est vide</h1>
+      <div className="glass-strong mx-auto mt-6 max-w-xl rounded-3xl p-8 text-center">
+        <h1 className="font-display text-2xl">Bienvenue 👋</h1>
         <p className="mt-3 text-foreground/65">
-          Ajoute les mots que tu croises dans tes lectures. L’app détecte leur nature et la
-          forme rencontrée, puis remplit la bonne case de leur tableau — à toi de compléter le
-          reste.
+          Construis ton dictionnaire russe au fil de tes lectures. Ajoute un premier mot : l’app
+          détecte sa nature et la forme rencontrée, puis remplit la bonne case de son tableau.
         </p>
         <Button render={<Link href="/add" />} nativeButton={false} size="lg" className="mt-6">
           Ajouter un premier mot
@@ -59,53 +33,46 @@ export default async function DashboardPage() {
     );
   }
 
+  // "Continuer" targets the most useful next action.
+  const anyIncomplete = items.some((i) => i.total > 0 && i.discovered < i.total);
+  const cont =
+    due > 0
+      ? { href: "/reviser", label: `Réviser (${due})` }
+      : anyIncomplete
+        ? { href: "/parcours", label: "S’entraîner" }
+        : { href: "/add", label: "Ajouter un mot" };
+
   return (
-    <div className="space-y-10">
-      <GameDashboard
-        stats={stats}
-        wordsCount={items.length}
-        formsDiscovered={formsDiscovered}
-        continueHref={cont.href}
-        continueLabel={cont.label}
-      />
+    <div className="space-y-8">
+      <GameDashboard stats={stats} continueHref={cont.href} continueLabel={cont.label} />
 
-      {/* Progression */}
-      <section className="space-y-4">
-        <h2 className="text-xs font-medium uppercase tracking-[0.18em] text-foreground/40">
-          Progression
-        </h2>
-        <Milestones count={items.length} validatedLevel={validated.vocabulary} />
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <CompletionProgress
-            track="declension"
-            filled={decl.filled}
-            totalCells={decl.total}
-            validatedLevel={validated.declension}
-          />
-          <CompletionProgress
-            track="conjugation"
-            filled={conj.filled}
-            totalCells={conj.total}
-            validatedLevel={validated.conjugation}
-          />
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-medium uppercase tracking-[0.18em] text-foreground/40">
+            Progression par nature
+          </h2>
+          <Link
+            href="/parcours"
+            className="inline-flex items-center gap-1 text-xs text-foreground/45 transition-colors hover:text-primary"
+          >
+            Parcours <ArrowRight className="size-3.5" />
+          </Link>
         </div>
+        <HomeProgress rows={progress} />
       </section>
 
-      {/* Collection */}
-      <section className="space-y-4">
-        <div className="flex items-end justify-between">
-          <div>
-            <h2 className="font-display text-2xl">Mes mots</h2>
-            <p className="text-sm text-foreground/55">
-              {items.length} mot{items.length > 1 ? "s" : ""} dans ta collection
-            </p>
-          </div>
-          <Button render={<Link href="/add" />} nativeButton={false}>
-            + Ajouter
-          </Button>
+      <Link
+        href="/collection"
+        className="glass glass-lift flex items-center justify-between rounded-2xl px-5 py-4"
+      >
+        <div>
+          <p className="font-medium">Ma collection</p>
+          <p className="text-sm text-foreground/55">
+            {items.length} mot{items.length > 1 ? "s" : ""} · parcours tes mots et leurs tableaux
+          </p>
         </div>
-        <CollectionView items={items} />
-      </section>
+        <ArrowRight className="size-5 text-foreground/40" />
+      </Link>
     </div>
   );
 }
