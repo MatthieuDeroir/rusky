@@ -47,6 +47,8 @@ export default async function HomePage() {
     <div className="space-y-8">
       <GameDashboard stats={stats} continueHref={cont.href} continueLabel={cont.label} />
 
+      <RadioPlayer />
+
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-medium uppercase tracking-[0.18em] text-foreground/40">
@@ -74,8 +76,6 @@ export default async function HomePage() {
         </div>
         <ArrowRight className="size-5 text-foreground/40" />
       </Link>
-
-      <RadioPlayer />
     </div>
   );
 }

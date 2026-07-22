@@ -6,6 +6,8 @@ import { Flame, Snowflake } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { NavLinks } from "@/components/nav-links";
 import { BottomNav } from "@/components/bottom-nav";
+import { RadioProvider } from "@/components/radio/radio-provider";
+import { MiniPlayer } from "@/components/radio/mini-player";
 
 // Wraps the page in the app chrome (header, footer, bottom nav) — except on /login, which is a
 // standalone full-screen page with no navigation.
@@ -25,7 +27,7 @@ export function SiteChrome({
   }
 
   return (
-    <>
+    <RadioProvider>
       {/* Header, Citoyen-style: brand left, streak + freezes right, no glass panel behind it. */}
       <header className="px-4 pt-5 pb-1">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
@@ -78,6 +80,7 @@ export function SiteChrome({
       </footer>
 
       <BottomNav />
-    </>
+      <MiniPlayer />
+    </RadioProvider>
   );
 }

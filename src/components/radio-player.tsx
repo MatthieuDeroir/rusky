@@ -1,38 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
 import { Play, Pause, Radio, Loader2 } from "lucide-react";
 import { RADIO_STATIONS } from "@/lib/radio";
+import { useRadio } from "@/components/radio/radio-provider";
 
-// Compact live-radio card for passive Russian immersion. A plain <audio> element streams the
-// chosen station; switching stations swaps the source and keeps playing.
+// Home radio card — station picker + play/pause, driven by the shared RadioProvider so playback
+// keeps going as you move around the app (pause it here or from the mini-player anywhere).
 export function RadioPlayer() {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [stationId, setStationId] = useState(RADIO_STATIONS[0].id);
-  const [state, setState] = useState<"idle" | "loading" | "playing" | "error">("idle");
-
-  const station = RADIO_STATIONS.find((s) => s.id === stationId) ?? RADIO_STATIONS[0];
-
-  function play(id: string) {
-    const el = audioRef.current;
-    if (!el) return;
-    const s = RADIO_STATIONS.find((x) => x.id === id) ?? RADIO_STATIONS[0];
-    setStationId(id);
-    setState("loading");
-    el.src = s.url;
-    el.play().catch(() => setState("error"));
-  }
-
-  function toggle() {
-    const el = audioRef.current;
-    if (!el) return;
-    if (state === "playing" || state === "loading") {
-      el.pause();
-      setState("idle");
-    } else {
-      play(stationId);
-    }
-  }
+  const { state, stationId, station, play, toggle } = useRadio();
 
   return (
     <section className="glass rounded-2xl p-4">
@@ -87,14 +62,6 @@ export function RadioPlayer() {
           </button>
         ))}
       </div>
-
-      <audio
-        ref={audioRef}
-        preload="none"
-        onPlaying={() => setState("playing")}
-        onWaiting={() => setState("loading")}
-        onError={() => setState("error")}
-      />
     </section>
   );
 }
