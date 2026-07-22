@@ -13,7 +13,6 @@ import type { DetectionMatch } from "@/lib/detect";
 import { displayAccent } from "@/lib/grammar";
 import { getRecognitionCtor, noopSubscribe, type Recognition } from "@/lib/speech";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { RussianInput } from "@/components/russian-keyboard";
@@ -25,8 +24,6 @@ function matchId(m: DetectionMatch) {
 export function AddWord() {
   const [word, setWord] = useState("");
   const [groups, setGroups] = useState<DetectedWord[] | null>(null);
-  const [source, setSource] = useState("");
-  const [context, setContext] = useState("");
   const [isSearching, startSearch] = useTransition();
   const [isSaving, startSave] = useTransition();
   const [listening, setListening] = useState(false);
@@ -116,7 +113,6 @@ export function AddWord() {
   function reset() {
     setWord("");
     setGroups(null);
-    setContext("");
     setInterim("");
   }
 
@@ -137,8 +133,6 @@ export function AddWord() {
             entryId: m.entryId,
             rawInput: g.raw,
             matchedFormKey: m.formKey,
-            source,
-            context,
           });
         }
         addedWords += 1;
@@ -170,8 +164,6 @@ export function AddWord() {
         entryId: null,
         rawInput: word.trim(),
         matchedFormKey: null,
-        source,
-        context,
       });
       toast.success(`« ${word.trim()} » enregistré (à classer plus tard).`);
       reset();
@@ -222,32 +214,6 @@ export function AddWord() {
         {interim && (
           <p className="mt-1 px-1 text-sm italic text-foreground/40">{interim}…</p>
         )}
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="source" className="text-xs text-foreground/60">
-              Source (livre / texte) — optionnel
-            </Label>
-            <Input
-              id="source"
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              placeholder="ex. Преступление и наказание"
-              className="mt-1 border-white/15 bg-white/5"
-            />
-          </div>
-          <div>
-            <Label htmlFor="context" className="text-xs text-foreground/60">
-              Contexte (phrase) — optionnel
-            </Label>
-            <Input
-              id="context"
-              value={context}
-              onChange={(e) => setContext(e.target.value)}
-              placeholder="la phrase où tu l'as vu"
-              className="mt-1 border-white/15 bg-white/5"
-            />
-          </div>
-        </div>
       </div>
 
       {isSearching && <p className="text-center text-sm text-foreground/50">Analyse…</p>}
@@ -336,13 +302,20 @@ export function AddWord() {
             </div>
           ))}
 
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <Button onClick={save} disabled={isSaving || addable.length === 0} size="lg">
+          <div className="pt-2">
+            <Button
+              onClick={save}
+              disabled={isSaving || addable.length === 0}
+              size="lg"
+              className="w-full sm:ml-auto sm:w-auto"
+            >
               {isSaving
                 ? "Ajout…"
                 : addable.length === 0
                   ? "Déjà dans ta collection"
-                  : "Ajouter à ma collection"}
+                  : addable.length > 1
+                    ? `Ajouter ${addable.length} formes`
+                    : "Ajouter à ma collection"}
             </Button>
           </div>
         </div>
