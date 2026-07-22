@@ -1,7 +1,7 @@
 import NextAuth, { type Session } from "next-auth";
-import Google from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db";
+import { authConfig } from "@/lib/auth.config";
 
 // The account whose email owns the pre-existing (legacy) data. On first login the
 // unclaimed rows (userId NULL, or the "__legacy__" sentinel on state tables) are
@@ -35,22 +35,10 @@ export async function ensureUserStats(userId: string): Promise<void> {
 }
 
 const nextAuth = NextAuth({
+  ...authConfig,
+  // The adapter persists User/Account rows (needed to scope data per user). It pulls in
+  // Prisma/Node built-ins, so it lives here and NOT in the edge-safe authConfig.
   adapter: PrismaAdapter(prisma),
-  // JWT sessions so the middleware can gate routes on the edge without a DB round-trip.
-  // The adapter still persists User/Account rows (needed to scope data per user).
-  session: { strategy: "jwt" },
-  providers: [Google],
-  pages: { signIn: "/login" },
-  callbacks: {
-    jwt({ token, user }) {
-      if (user?.id) token.id = user.id;
-      return token;
-    },
-    session({ session, token }) {
-      if (token.id && session.user) session.user.id = token.id as string;
-      return session;
-    },
-  },
   events: {
     async signIn({ user }) {
       if (!user.id) return;

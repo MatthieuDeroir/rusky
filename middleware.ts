@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import NextAuth from "next-auth";
+import { authConfig } from "@/lib/auth.config";
+
+// Build an edge-safe `auth` from the adapter-free config: the middleware runs on the Edge
+// runtime and must NOT import Prisma / Node built-ins (that lives in @/lib/auth).
+const { auth } = NextAuth(authConfig);
 
 // Local dev bypass: skip all auth gating so the app is usable without Google.
 const devBypass =
