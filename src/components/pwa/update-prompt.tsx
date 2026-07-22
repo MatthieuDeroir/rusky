@@ -10,6 +10,16 @@ export function UpdatePrompt() {
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
 
+    // In development the SW + HMR can fight and cause a reload loop — never register it there,
+    // and unregister any stale worker (e.g. left over from a prod build served locally).
+    if (process.env.NODE_ENV !== "production") {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((regs) => regs.forEach((r) => r.unregister()))
+        .catch(() => {});
+      return;
+    }
+
     let reg: ServiceWorkerRegistration | undefined;
     navigator.serviceWorker
       .register("/sw.js")
