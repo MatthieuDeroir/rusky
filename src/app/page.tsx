@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { getCollection, getTypeProgress, dueReviewCount } from "@/lib/queries";
 import { GameDashboard } from "@/components/game-dashboard";
 import { HomeProgress } from "@/components/home-progress";
+import { RadioPlayer } from "@/components/radio-player";
 import { currentUserId } from "@/lib/auth";
 import { getGameStats } from "@/lib/xp";
 import { Button } from "@/components/ui/button";
@@ -73,6 +74,8 @@ export default async function HomePage() {
         </div>
         <ArrowRight className="size-5 text-foreground/40" />
       </Link>
+
+      <RadioPlayer />
     </div>
   );
 }

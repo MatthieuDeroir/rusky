@@ -9,8 +9,8 @@ import { ChevronDown } from "lucide-react";
 // plain link. The "Ajouter" CTA is rendered separately (highlighted) after these.
 const NAV: { label: string; items: { href: string; label: string }[] }[] = [
   { label: "Accueil", items: [{ href: "/", label: "Accueil" }] },
-  { label: "Parcours", items: [{ href: "/parcours", label: "Parcours" }] },
   { label: "Collection", items: [{ href: "/collection", label: "Ma collection" }] },
+  { label: "Parcours", items: [{ href: "/parcours", label: "Parcours" }] },
   {
     label: "Référence",
     items: [

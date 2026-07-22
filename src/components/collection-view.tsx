@@ -16,8 +16,6 @@ import type { CollectionItem } from "@/lib/queries";
 import { deleteWordAction } from "@/app/actions";
 import { ProgressRing } from "@/components/progress-ring";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { SpeakButton } from "@/components/speak-button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 
 const TYPE_ORDER: WordType[] = [
@@ -179,49 +177,48 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
         </p>
       )}
 
-      {/* Filtered, grouped word cards */}
+      {/* Filtered, grouped word rows — compact, dense list */}
       {shownGrouped.map(([type, list]) => (
-        <section key={type} className="space-y-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-foreground/50">
+        <section key={type} className="space-y-2">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-foreground/45">
             {WORD_TYPE_LABELS[type]}s · {list.length}
           </h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
             {list.map((it) => (
               <div key={it.id} className="group relative min-w-0">
                 <Link
                   href={`/word/${it.id}`}
-                  className="glass glass-lift flex items-center justify-between rounded-2xl p-4 hover:bg-white/10"
+                  className="glass glass-lift flex items-center gap-2 rounded-xl py-2 pl-3 pr-2.5 hover:bg-white/10"
                 >
-                  <div className="min-w-0 pr-6">
-                    <div className="truncate font-display text-2xl">
-                      {displayAccent(it.accented)}
-                    </div>
-                    {it.translationsFr && (
-                      <div className="truncate text-sm text-foreground/55">
-                        {it.translationsFr}
-                      </div>
-                    )}
-                  </div>
-                  {it.total > 0 ? (
-                    <ProgressRing value={it.discovered} total={it.total} />
-                  ) : (
-                    <Badge variant="secondary" className="bg-white/10 text-xs">
-                      invariable
-                    </Badge>
+                  <span className="shrink-0 font-display text-lg leading-none">
+                    {displayAccent(it.accented)}
+                  </span>
+                  {it.translationsFr && (
+                    <span className="min-w-0 flex-1 truncate text-xs text-foreground/50">
+                      {it.translationsFr}
+                    </span>
                   )}
+                  <span className="ml-auto shrink-0 pl-1">
+                    {it.total > 0 ? (
+                      <span className="text-xs tabular-nums text-foreground/45 group-hover:opacity-0">
+                        {it.discovered}/{it.total}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-foreground/35 group-hover:opacity-0">
+                        invar.
+                      </span>
+                    )}
+                  </span>
                 </Link>
-                <SpeakButton
-                  text={it.accented}
-                  className="absolute right-11 top-2 h-8 w-8 rounded-lg bg-[oklch(0.17_0.03_280)]/70 opacity-0 backdrop-blur-sm transition-all focus-visible:opacity-100 group-hover:opacity-100"
-                />
+                {/* Delete appears on hover, over the progress counter. */}
                 <button
                   type="button"
                   onClick={() => setPending(it)}
                   aria-label={`Supprimer ${it.bare}`}
                   title="Supprimer de ma collection"
-                  className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-lg bg-[oklch(0.17_0.03_280)]/70 text-foreground/45 opacity-0 backdrop-blur-sm transition-all hover:bg-destructive/25 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                  className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-lg bg-[oklch(0.17_0.03_280)]/80 text-foreground/45 opacity-0 backdrop-blur-sm transition-all hover:bg-destructive/25 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="size-3.5" />
                 </button>
               </div>
             ))}

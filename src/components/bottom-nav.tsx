@@ -6,8 +6,8 @@ import { Home, Route, Library, Plus, BookOpen, GraduationCap, User } from "lucid
 
 const ITEMS = [
   { href: "/", label: "Accueil", icon: Home, exact: true },
-  { href: "/parcours", label: "Parcours", icon: Route },
   { href: "/collection", label: "Collection", icon: Library },
+  { href: "/parcours", label: "Parcours", icon: Route },
   { href: "/add", label: "Ajouter", icon: Plus, central: true },
   { href: "/reference", label: "Référence", icon: BookOpen },
   { href: "/validation", label: "Validation", icon: GraduationCap },
