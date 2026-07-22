@@ -11,6 +11,7 @@ import {
   type TranslateResult,
 } from "@/app/actions";
 import { displayAccent } from "@/lib/grammar";
+import { showXpToast } from "@/lib/xp-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +74,7 @@ export function TranslateCard({
       });
       setResult(r);
       setScore((s) => ({ right: s.right + (r.correct ? 1 : 0), total: s.total + 1 }));
+      showXpToast(r.xp);
     });
   }
 

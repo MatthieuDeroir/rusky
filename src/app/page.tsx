@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { getCollection } from "@/lib/queries";
+import { getCollection, dueReviewCount } from "@/lib/queries";
 import { CollectionView } from "@/components/collection-view";
 import { Milestones } from "@/components/milestones";
 import { CompletionProgress } from "@/components/completion-progress";
+import { GameDashboard } from "@/components/game-dashboard";
 import { getValidatedLevels } from "@/lib/level-store";
 import { currentUserId } from "@/lib/auth";
+import { getGameStats } from "@/lib/xp";
 import { Button } from "@/components/ui/button";
 
 const DECLINING = new Set(["noun", "adjective", "pronoun", "numeral"]);
@@ -27,6 +29,17 @@ export default async function DashboardPage() {
     }
   }
   const validated = await getValidatedLevels(userId);
+  const stats = await getGameStats(userId);
+  const due = await dueReviewCount(userId);
+
+  // "Continuer" targets the most useful next action: due reviews → incomplete words → add.
+  const anyIncomplete = items.some((i) => i.total > 0 && i.discovered < i.total);
+  const cont =
+    due > 0
+      ? { href: "/reviser", label: `Réviser (${due})` }
+      : anyIncomplete
+        ? { href: "/exercices", label: "S’entraîner" }
+        : { href: "/add", label: "Ajouter un mot" };
 
   if (items.length === 0) {
     return (
@@ -46,6 +59,8 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-8">
+      <GameDashboard stats={stats} continueHref={cont.href} continueLabel={cont.label} />
+
       <div className="flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Mes mots</h1>

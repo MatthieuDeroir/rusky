@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
+import { addXp, setDailyGoal, type XpAward } from "@/lib/xp";
+import { review as srsReview, nextDueDate, INITIAL_STATE } from "@/lib/srs";
 import { backupDatabase } from "@/lib/backup";
 import { detectWord, type DetectionMatch } from "@/lib/detect";
 import { hintForForm, reviewItems, themeOf } from "@/lib/queries";
@@ -45,6 +47,15 @@ import { saveMcqKey, getMcqKey } from "@/lib/exam-items-store";
 
 export async function detectAction(input: string): Promise<DetectionMatch[]> {
   return detectWord(input);
+}
+
+/** Update the user's daily XP goal (profile). Returns the clamped value that was saved. */
+export async function setDailyGoalAction(goal: number): Promise<{ goal: number }> {
+  const userId = await currentUserId();
+  const saved = await setDailyGoal(userId, goal);
+  revalidatePath("/");
+  revalidatePath("/profil");
+  return { goal: saved };
 }
 
 export interface DetectedWord {
@@ -93,6 +104,7 @@ export async function setTranslationAction(entryId: number, fr: string) {
 export interface FillCellResult {
   correct: boolean;
   expected: string[];
+  xp?: XpAward;
 }
 
 /**
@@ -111,6 +123,7 @@ export async function fillCellAction(input: {
   const accepted = new Set(forms.map((f) => f.bareForm));
   const correct = accepted.has(normalizeBare(input.answer));
 
+  let xp: XpAward | undefined;
   if (correct) {
     const userId = await currentUserId();
     await prisma.encounter.create({
@@ -122,10 +135,11 @@ export async function fillCellAction(input: {
         userId,
       },
     });
+    xp = await addXp(userId, "complete");
     revalidatePath("/");
     revalidatePath(`/word/${input.entryId}`);
   }
-  return { correct, expected };
+  return { correct, expected, xp };
 }
 
 export interface AddEncounterInput {
@@ -148,9 +162,10 @@ export async function addEncounterAction(data: AddEncounterInput) {
       userId,
     },
   });
+  const xp = await addXp(userId, "discover");
   revalidatePath("/");
   if (data.entryId) revalidatePath(`/word/${data.entryId}`);
-  return { id: encounter.id };
+  return { id: encounter.id, xp };
 }
 
 /**
@@ -268,6 +283,7 @@ export async function getQuizQuestionAction(
 export interface QuizResult {
   correct: boolean;
   expected: string[]; // accepted accented forms
+  xp?: XpAward;
 }
 
 export async function submitQuizAction(input: {
@@ -293,7 +309,8 @@ export async function submitQuizAction(input: {
     },
   });
 
-  return { correct, expected };
+  const xp = correct ? await addXp(userId, "quiz") : undefined;
+  return { correct, expected, xp };
 }
 
 // ---- Translation mode (Traduire) -------------------------------------------------
@@ -402,6 +419,7 @@ export async function getTranslateQuestionAction(
 export interface TranslateResult {
   correct: boolean;
   expected: string[];
+  xp?: XpAward;
 }
 
 export async function submitTranslateAction(input: {
@@ -447,7 +465,8 @@ export async function submitTranslateAction(input: {
       userId,
     },
   });
-  return { correct, expected };
+  const xp = correct ? await addXp(userId, "translate") : undefined;
+  return { correct, expected, xp };
 }
 
 // ---- Rattrapage (catch-up on items last answered wrong) ---------------------------
@@ -620,6 +639,7 @@ export interface SpeakResult {
   correct: boolean;
   expected: string[]; // accepted accented forms
   heard: string; // what speech-to-text understood (best hypothesis)
+  xp?: XpAward;
 }
 
 /** Levenshtein distance — used to tolerate a one-letter slip on short words. */
@@ -709,7 +729,8 @@ export async function submitSpeakAction(input: {
     },
   });
 
-  return { correct, expected, heard };
+  const xp = correct ? await addXp(userId, "speak") : undefined;
+  return { correct, expected, heard, xp };
 }
 
 // ---- Cas (which case does this trigger govern?) -----------------------------------
@@ -822,6 +843,7 @@ export interface CaseResult {
   correct: boolean;
   correctCases: CaseCode[];
   explanation: string;
+  xp?: XpAward;
 }
 
 export async function submitCaseAction(input: {
@@ -831,6 +853,7 @@ export async function submitCaseAction(input: {
 }): Promise<CaseResult> {
   const t = triggerCase(input.trigger);
   const correct = t !== null && t.cases.includes(input.chosen);
+  let xp: XpAward | undefined;
   if (input.entryId != null) {
     const userId = await currentUserId();
     await prisma.quizAttempt.create({
@@ -842,11 +865,13 @@ export async function submitCaseAction(input: {
         userId,
       },
     });
+    if (correct) xp = await addXp(userId, "case");
   }
   return {
     correct,
     correctCases: t?.cases ?? [input.chosen],
     explanation: t ? explainTrigger(t) : "",
+    xp,
   };
 }
 
@@ -861,6 +886,7 @@ export interface SentenceTok {
 export interface SentenceCheck {
   tokens: SentenceTok[];
   issues: SentenceIssue[];
+  xp?: XpAward;
 }
 
 const POS_FR: Record<string, string> = {
@@ -952,7 +978,126 @@ export async function checkSentenceAction(sentence: string): Promise<SentenceChe
     pos: t.prepCases ? "préposition" : primaryPos(byNorm.get(t.norm)?.types ?? new Set()),
   }));
 
-  return { tokens, issues };
+  // Reward a clean sentence (at least a couple of recognized words, no case issues).
+  let xp: XpAward | undefined;
+  const recognizedNominals = toks.filter((t) => t.recognized).length;
+  if (issues.length === 0 && recognizedNominals >= 2) {
+    xp = await addXp(await currentUserId(), "sentence");
+  }
+  return { tokens, issues, xp };
+}
+
+// ---- Réviser (SRS spaced repetition) ---------------------------------------------
+
+/** Seed the SRS queue from the user's discovered forms the first time they open Réviser. */
+async function ensureReviewSeed(userId: string): Promise<void> {
+  const count = await prisma.formReview.count({ where: { userId } });
+  if (count > 0) return;
+  const enc = await prisma.encounter.findMany({
+    where: { userId, entryId: { not: null }, matchedFormKey: { not: null } },
+    select: { entryId: true, matchedFormKey: true },
+  });
+  const seen = new Set<string>();
+  const now = new Date();
+  const data: { userId: string; entryId: number; formKey: string; dueAt: Date }[] = [];
+  for (const e of enc) {
+    const key = `${e.entryId}|${e.matchedFormKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    data.push({ userId, entryId: e.entryId!, formKey: e.matchedFormKey!, dueAt: now });
+  }
+  if (data.length > 0) await prisma.formReview.createMany({ data });
+}
+
+/** A due SRS card (same shape as a quiz question) or "empty" when nothing is due. */
+export async function getReviewCardAction(exclude?: string): Promise<QuizQuestion | "empty"> {
+  const userId = await currentUserId();
+  await ensureReviewSeed(userId);
+
+  const due = await prisma.formReview.findMany({
+    where: { userId, dueAt: { lte: new Date() } },
+    take: 60,
+    select: { entryId: true, formKey: true },
+  });
+  if (due.length === 0) return "empty";
+
+  const choices =
+    exclude && due.length > 1
+      ? due.filter((d) => `${d.entryId}|${d.formKey}` !== exclude)
+      : due;
+  const pick = choices[Math.floor(Math.random() * choices.length)];
+
+  const entry = await prisma.dictionaryEntry.findUnique({ where: { id: pick.entryId } });
+  if (!entry) return "empty";
+  const formVariants = await prisma.dictionaryForm.findMany({
+    where: { entryId: pick.entryId },
+    orderBy: { variantIndex: "asc" },
+    select: { formKey: true, accented: true },
+  });
+  const forms = new Map<string, string[]>();
+  for (const f of formVariants) {
+    const arr = forms.get(f.formKey) ?? [];
+    arr.push(f.accented);
+    forms.set(f.formKey, arr);
+  }
+  return {
+    entryId: entry.id,
+    accented: entry.accented,
+    bare: entry.bare,
+    type: entry.type as WordType,
+    typeLabel: WORD_TYPE_LABELS[entry.type as WordType],
+    translationsFr: entry.translationsFr,
+    formKey: pick.formKey,
+    formLabel: describeFormKey(pick.formKey),
+    hint: hintForForm(entry, forms, pick.formKey),
+  };
+}
+
+export interface ReviewResult extends QuizResult {
+  dueInDays: number; // when this form comes back
+}
+
+/** Grade an SRS card and reschedule it (SM-2). Correct → "good", wrong → "again". */
+export async function submitReviewAction(input: {
+  entryId: number;
+  formKey: string;
+  answer: string;
+}): Promise<ReviewResult> {
+  const userId = await currentUserId();
+  const forms = await prisma.dictionaryForm.findMany({
+    where: { entryId: input.entryId, formKey: input.formKey },
+  });
+  const expected = forms.map((f) => f.accented);
+  const accepted = new Set(forms.map((f) => f.bareForm));
+  const correct = accepted.has(normalizeBare(input.answer));
+
+  const existing = await prisma.formReview.findUnique({
+    where: { userId_entryId_formKey: { userId, entryId: input.entryId, formKey: input.formKey } },
+  });
+  const state = existing
+    ? {
+        ease: existing.ease,
+        intervalDays: existing.intervalDays,
+        repetitions: existing.repetitions,
+        lapses: existing.lapses,
+      }
+    : INITIAL_STATE;
+  const next = srsReview(state, correct ? "good" : "again");
+  const now = new Date();
+  const dueAt = nextDueDate(next, now);
+  await prisma.formReview.upsert({
+    where: { userId_entryId_formKey: { userId, entryId: input.entryId, formKey: input.formKey } },
+    update: { ...next, dueAt, lastReviewedAt: now },
+    create: { userId, entryId: input.entryId, formKey: input.formKey, ...next, dueAt, lastReviewedAt: now },
+  });
+
+  // Keep the catch-up view consistent with a normal practice attempt.
+  await prisma.quizAttempt.create({
+    data: { entryId: input.entryId, formKey: input.formKey, userAnswer: input.answer, correct, userId },
+  });
+
+  const xp = correct ? await addXp(userId, "review") : undefined;
+  return { correct, expected, xp, dueInDays: next.intervalDays };
 }
 
 // ---- Level control tests (valider un palier de complétion) -----------------------
@@ -1063,6 +1208,7 @@ export async function getLevelTestAction(track: Track): Promise<LevelTestInfo> {
 export interface LevelTestResult {
   passed: boolean;
   validatedLevel: number; // highest validated index after this attempt
+  xp?: XpAward;
 }
 
 /** Finalize a control: if the score meets the threshold, validate the target level. */
@@ -1075,12 +1221,14 @@ export async function submitLevelTestAction(input: {
   const userId = await currentUserId();
   const passed = input.total > 0 && input.score >= neededCorrect(input.total);
   let validated = (await getValidatedLevels(userId))[input.track];
+  let xp: XpAward | undefined;
   if (passed) {
     const next = await recordValidatedLevel(userId, input.track, input.level);
     validated = next[input.track];
+    xp = await addXp(userId, "control");
     revalidatePath("/");
   }
-  return { passed, validatedLevel: validated };
+  return { passed, validatedLevel: validated, xp };
 }
 
 // ---- Vocabulary control (valider un palier de vocabulaire, dans l'ordre d'acquisition) ----
@@ -1166,6 +1314,7 @@ export interface GradeProductionResult extends GradeResult {
   taskId: string;
   passed: boolean; // recorded as passed (= result.pass)
   error?: string;
+  xp?: XpAward;
 }
 
 /** Generate the material for a generated épreuve (grammaire QCM / lecture / ecoute). For QCM,
@@ -1215,12 +1364,14 @@ export async function gradeExamAction(input: {
       result = await gradeMcq(userId, input.item, input.answers ?? []);
     }
 
+    let xp: XpAward | undefined;
     if (result.pass) {
       await recordPassedTask(userId, task.id);
+      xp = await addXp(userId, "torfl");
       revalidatePath("/validation");
       revalidatePath(`/validation/${task.cefr}`);
     }
-    return { ...result, taskId: task.id, passed: result.pass };
+    return { ...result, taskId: task.id, passed: result.pass, xp };
   } catch (e) {
     return blankGrade(input.taskId, e instanceof Error ? e.message : "Erreur de correction.");
   }

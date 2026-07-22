@@ -11,6 +11,7 @@ import {
   type QuizResult,
 } from "@/app/actions";
 import { displayAccent } from "@/lib/grammar";
+import { showXpToast } from "@/lib/xp-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { RussianInput } from "@/components/russian-keyboard";
@@ -64,6 +65,7 @@ export function QuizCard({
       });
       setResult(r);
       setScore((s) => ({ right: s.right + (r.correct ? 1 : 0), total: s.total + 1 }));
+      showXpToast(r.xp);
     });
   }
 

@@ -18,6 +18,7 @@ const NAV: { label: string; items: { href: string; label: string }[] }[] = [
     ],
   },
   { label: "Validation", items: [{ href: "/validation", label: "Validation" }] },
+  { label: "Profil", items: [{ href: "/profil", label: "Profil" }] },
 ];
 
 export function NavLinks() {

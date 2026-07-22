@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth, signIn, devBypass } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/logo";
 
 export const metadata = { title: "Connexion · Русский" };
 
@@ -11,10 +12,7 @@ export default async function LoginPage() {
 
   return (
     <div className="mx-auto mt-10 flex max-w-md flex-col items-center">
-      <div className="relative grid size-16 place-items-center rounded-full border border-primary/40 font-display text-4xl leading-none text-primary">
-        Я
-        <span className="absolute -bottom-0.5 left-1/2 h-px w-7 -translate-x-1/2 bg-primary/60" />
-      </div>
+      <Logo size={64} className="text-primary" />
       <h1 className="mt-5 font-display text-3xl tracking-tight">Русский</h1>
       <p className="mt-2 text-center text-sm text-foreground/60">
         Construis ton dictionnaire russe au fil de tes lectures. Connecte-toi pour

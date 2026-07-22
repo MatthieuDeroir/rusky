@@ -506,6 +506,13 @@ export async function getCollectedCaseTriggers(userId: string): Promise<string[]
     .map((t) => t.trigger);
 }
 
+/** Number of spaced-repetition forms currently due for this user (SRS "Réviser" queue). */
+export async function dueReviewCount(userId: string): Promise<number> {
+  return prisma.formReview.count({
+    where: { userId, dueAt: { lte: new Date() } },
+  });
+}
+
 /** Count of catch-up items per exercise kind. */
 export async function getReviewSummary(userId: string): Promise<Record<ReviewKind, number>> {
   const counts: Record<ReviewKind, number> = {
