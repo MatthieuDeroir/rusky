@@ -120,14 +120,14 @@ export function ExercicesBrowser({ themes }: { themes: ExerciseTheme[] }) {
           )}
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {theme.words.map((w) => {
             const done = w.total > 0 && w.discovered >= w.total;
             return (
               <Link
                 key={w.id}
                 href={`/word/${w.id}?theme=${theme.key}`}
-                className={`glass-lift flex items-center justify-between rounded-xl px-3 py-2 transition-colors hover:bg-white/10 ${
+                className={`glass-lift flex min-w-0 items-center justify-between rounded-xl px-3 py-2 transition-colors hover:bg-white/10 ${
                   done ? "bg-white/[0.02] opacity-45" : "bg-white/5"
                 }`}
               >

@@ -126,10 +126,14 @@
   }
   html {
     @apply font-sans;
+    /* Responsive-first: never allow a stray wide child to scroll the page sideways. */
+    overflow-x: hidden;
   }
   body {
     @apply text-foreground;
     background-color: var(--background);
+    overflow-x: hidden;
+    max-width: 100%;
     /* Warm gradient mesh — restrained, atmospheric (gold + ember + deep ink). */
     background-image:
       radial-gradient(60rem 48rem at 6% -14%, oklch(0.78 0.12 80 / 0.16), transparent 60%),

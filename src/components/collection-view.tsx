@@ -185,9 +185,9 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
           <h2 className="text-sm font-medium uppercase tracking-wide text-foreground/50">
             {WORD_TYPE_LABELS[type]}s · {list.length}
           </h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {list.map((it) => (
-              <div key={it.id} className="group relative">
+              <div key={it.id} className="group relative min-w-0">
                 <Link
                   href={`/word/${it.id}`}
                   className="glass glass-lift flex items-center justify-between rounded-2xl p-4 hover:bg-white/10"

@@ -75,7 +75,7 @@ export default async function DashboardPage() {
 
       <Milestones count={items.length} validatedLevel={validated.vocabulary} />
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <CompletionProgress
           track="declension"
           filled={decl.filled}
