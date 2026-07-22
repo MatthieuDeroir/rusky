@@ -30,8 +30,18 @@ function subLabel(label: string): string {
   return i >= 0 ? label.slice(i + 1).trim() : label;
 }
 
-export function ExercicesBrowser({ themes }: { themes: ExerciseTheme[] }) {
-  const [selectedKey, setSelectedKey] = useState(themes[0]?.key ?? "");
+export function ExercicesBrowser({
+  themes,
+  initialType,
+}: {
+  themes: ExerciseTheme[];
+  initialType?: string;
+}) {
+  // Deep-link support: /exercices?type=verb opens straight onto that type's exercises.
+  const firstOfType = initialType
+    ? themes.find((th) => typeOf(th.key) === initialType)?.key
+    : undefined;
+  const [selectedKey, setSelectedKey] = useState(firstOfType ?? themes[0]?.key ?? "");
 
   const types = TYPE_ORDER.filter((t) => themes.some((th) => typeOf(th.key) === t));
   const selectedType = typeOf(selectedKey);

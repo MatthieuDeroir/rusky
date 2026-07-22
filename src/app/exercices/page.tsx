@@ -6,7 +6,12 @@ import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
-export default async function ExercicesPage() {
+export default async function ExercicesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ type?: string }>;
+}) {
+  const { type } = await searchParams;
   const userId = await currentUserId();
   const themes = await getThemes(userId);
 
@@ -33,7 +38,7 @@ export default async function ExercicesPage() {
           Choisis un type, puis une déclinaison / conjugaison, et entraîne-toi sur ce groupe.
         </p>
       </div>
-      <ExercicesBrowser themes={themes} />
+      <ExercicesBrowser themes={themes} initialType={type} />
     </div>
   );
 }

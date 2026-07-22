@@ -6,12 +6,12 @@ import { getCoverage } from "@/lib/queries";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Parcours · Русский" };
 
-// Map a coverage type to its Exercices theme filter (best-effort: the exercices browser groups
-// by finer themes, but landing on the type is a good entry point).
-const THEME_HINT: Record<string, string> = {
-  noun: "noun-1",
-  verb: "verb-1",
-  adjective: "adj-hard",
+// Map a coverage type (from the dictionary) to the Exercices browser's type key, so a Parcours
+// card opens straight onto that type's exercises rather than the global overview.
+const EX_TYPE: Record<string, string> = {
+  noun: "noun",
+  verb: "verb",
+  adjective: "adj",
   pronoun: "pronoun",
   numeral: "numeral",
   other: "other",
@@ -65,7 +65,7 @@ export default async function ParcoursPage() {
         {rows.map((r) => (
           <Link
             key={r.type}
-            href={`/exercices?type=${THEME_HINT[r.type] ?? ""}`}
+            href={`/exercices?type=${EX_TYPE[r.type] ?? ""}`}
             className="glass glass-lift group rounded-2xl p-5"
           >
             <div className="flex items-baseline justify-between gap-3">
