@@ -6,6 +6,8 @@ import Google from "next-auth/providers/google";
 export const authConfig = {
   providers: [Google],
   pages: { signIn: "/login" },
+  // Trust the Vercel deployment host (preview + prod) for callback URLs.
+  trustHost: true,
   // JWT sessions so the middleware can authorize on the edge without a DB round-trip.
   session: { strategy: "jwt" },
   callbacks: {
