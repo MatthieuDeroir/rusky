@@ -2,9 +2,10 @@ interface ProgressRingProps {
   value: number; // 0..total
   total: number;
   size?: number;
+  label?: string; // center text override (defaults to "value/total")
 }
 
-export function ProgressRing({ value, total, size = 44 }: ProgressRingProps) {
+export function ProgressRing({ value, total, size = 44, label }: ProgressRingProps) {
   const pct = total > 0 ? value / total : 0;
   const stroke = 4;
   const r = (size - stroke) / 2;
@@ -35,8 +36,8 @@ export function ProgressRing({ value, total, size = 44 }: ProgressRingProps) {
           className="text-primary transition-[stroke-dashoffset] duration-500"
         />
       </svg>
-      <span className="absolute text-[10px] font-medium tabular-nums text-foreground/80">
-        {value}/{total}
+      <span className="absolute text-[11px] font-medium tabular-nums text-foreground/80">
+        {label ?? `${value}/${total}`}
       </span>
     </div>
   );

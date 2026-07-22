@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
+import { Trash2, Shapes } from "lucide-react";
 import { toast } from "sonner";
 import {
   displayAccent,
@@ -96,45 +96,28 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
     (t) => [t, shown.filter((i) => i.type === t).sort(bySort)] as const,
   );
 
-  const pct = (d: number, t: number) => (t > 0 ? Math.round((d / t) * 100) : 0);
-
   return (
     <div className="space-y-8">
       {/* Per-type completion gauges (click to filter) */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <button
-          type="button"
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+        <TypeGauge
+          label="Tout"
+          count={items.length}
+          discovered={overall.discovered}
+          total={overall.total}
+          active={filter === "all"}
           onClick={() => setFilter("all")}
-          className={`glass glass-lift flex items-center gap-3 rounded-2xl p-4 text-left ${
-            filter === "all" ? "ring-2 ring-primary/70" : ""
-          }`}
-        >
-          <ProgressRing value={overall.discovered} total={overall.total} size={48} />
-          <div>
-            <div className="font-medium">Tout</div>
-            <div className="text-xs text-foreground/55">
-              {items.length} mot{items.length > 1 ? "s" : ""} · {pct(overall.discovered, overall.total)}%
-            </div>
-          </div>
-        </button>
-
+        />
         {stats.map((s) => (
-          <button
+          <TypeGauge
             key={s.type}
-            type="button"
+            label={`${WORD_TYPE_LABELS[s.type]}s`}
+            count={s.count}
+            discovered={s.discovered}
+            total={s.total}
+            active={filter === s.type}
             onClick={() => setFilter(s.type)}
-            className={`glass glass-lift flex items-center gap-3 rounded-2xl p-4 text-left ${
-              filter === s.type ? "ring-2 ring-primary/70" : ""
-            }`}
-          >
-            <ProgressRing value={s.discovered} total={s.total} size={48} />
-            <div>
-              <div className="font-medium">{WORD_TYPE_LABELS[s.type]}s</div>
-              <div className="text-xs text-foreground/55">
-                {s.count} · {s.total > 0 ? `${pct(s.discovered, s.total)}%` : "—"}
-              </div>
-            </div>
-          </button>
+          />
         ))}
       </div>
 
@@ -245,5 +228,49 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
         onCancel={() => !isDeleting && setPending(null)}
       />
     </div>
+  );
+}
+
+// A per-type filter gauge: the paradigm-completion % in the ring, the word count below.
+// Invariables have no paradigm, so they show an icon instead of an empty 0/0 ring.
+function TypeGauge({
+  label,
+  count,
+  discovered,
+  total,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  discovered: number;
+  total: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const hasForms = total > 0;
+  const pct = hasForms ? Math.round((discovered / total) * 100) : 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`glass glass-lift flex items-center gap-3 rounded-2xl p-3.5 text-left ${
+        active ? "ring-2 ring-primary/70" : ""
+      }`}
+    >
+      {hasForms ? (
+        <ProgressRing value={discovered} total={total} size={46} label={`${pct}%`} />
+      ) : (
+        <span className="grid size-[46px] shrink-0 place-items-center rounded-full bg-white/5 text-foreground/35 ring-1 ring-white/10">
+          <Shapes className="size-[18px]" />
+        </span>
+      )}
+      <div className="min-w-0">
+        <div className="truncate font-medium">{label}</div>
+        <div className="text-xs text-foreground/50">
+          {count} mot{count > 1 ? "s" : ""}
+        </div>
+      </div>
+    </button>
   );
 }
