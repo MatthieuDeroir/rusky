@@ -19,7 +19,9 @@ export default async function DashboardPage() {
   // Split paradigm completion into declension (noun-like) vs conjugation (verb) families.
   const decl = { filled: 0, total: 0 };
   const conj = { filled: 0, total: 0 };
+  let formsDiscovered = 0;
   for (const i of items) {
+    formsDiscovered += i.discovered;
     if (i.type === "verb") {
       conj.filled += i.discovered;
       conj.total += i.total;
@@ -58,39 +60,52 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <GameDashboard stats={stats} continueHref={cont.href} continueLabel={cont.label} />
+    <div className="space-y-10">
+      <GameDashboard
+        stats={stats}
+        wordsCount={items.length}
+        formsDiscovered={formsDiscovered}
+        continueHref={cont.href}
+        continueLabel={cont.label}
+      />
 
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Mes mots</h1>
-          <p className="text-sm text-foreground/55">
-            {items.length} mot{items.length > 1 ? "s" : ""} dans ta collection
-          </p>
+      {/* Progression */}
+      <section className="space-y-4">
+        <h2 className="text-xs font-medium uppercase tracking-[0.18em] text-foreground/40">
+          Progression
+        </h2>
+        <Milestones count={items.length} validatedLevel={validated.vocabulary} />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <CompletionProgress
+            track="declension"
+            filled={decl.filled}
+            totalCells={decl.total}
+            validatedLevel={validated.declension}
+          />
+          <CompletionProgress
+            track="conjugation"
+            filled={conj.filled}
+            totalCells={conj.total}
+            validatedLevel={validated.conjugation}
+          />
         </div>
-        <Button render={<Link href="/add" />} nativeButton={false}>
-          + Ajouter
-        </Button>
-      </div>
+      </section>
 
-      <Milestones count={items.length} validatedLevel={validated.vocabulary} />
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <CompletionProgress
-          track="declension"
-          filled={decl.filled}
-          totalCells={decl.total}
-          validatedLevel={validated.declension}
-        />
-        <CompletionProgress
-          track="conjugation"
-          filled={conj.filled}
-          totalCells={conj.total}
-          validatedLevel={validated.conjugation}
-        />
-      </div>
-
-      <CollectionView items={items} />
+      {/* Collection */}
+      <section className="space-y-4">
+        <div className="flex items-end justify-between">
+          <div>
+            <h2 className="font-display text-2xl">Mes mots</h2>
+            <p className="text-sm text-foreground/55">
+              {items.length} mot{items.length > 1 ? "s" : ""} dans ta collection
+            </p>
+          </div>
+          <Button render={<Link href="/add" />} nativeButton={false}>
+            + Ajouter
+          </Button>
+        </div>
+        <CollectionView items={items} />
+      </section>
     </div>
   );
 }

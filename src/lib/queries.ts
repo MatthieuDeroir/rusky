@@ -506,6 +506,62 @@ export async function getCollectedCaseTriggers(userId: string): Promise<string[]
     .map((t) => t.trigger);
 }
 
+export interface CoverageRow {
+  type: WordType;
+  label: string;
+  collected: number; // distinct dictionary entries of this type the user has encountered
+  total: number; // entries of this type in the whole dictionary
+  pct: number; // 0..100, collected / total
+}
+
+const TYPE_PLURAL: Record<string, string> = {
+  noun: "Noms",
+  verb: "Verbes",
+  adjective: "Adjectifs",
+  pronoun: "Pronoms",
+  numeral: "Numéraux",
+  other: "Invariables",
+};
+const COVERAGE_ORDER = ["noun", "verb", "adjective", "pronoun", "numeral", "other"];
+
+/**
+ * Coverage of the whole dictionary, by grammatical type: how many entries of each type the user
+ * has collected out of everything that exists in the reference database (incl. not-yet-seen).
+ */
+export async function getCoverage(userId: string): Promise<CoverageRow[]> {
+  const [totals, enc] = await Promise.all([
+    prisma.dictionaryEntry.groupBy({ by: ["type"], _count: { _all: true } }),
+    prisma.encounter.findMany({
+      where: { userId, entryId: { not: null } },
+      select: { entryId: true },
+      distinct: ["entryId"],
+    }),
+  ]);
+  const ids = enc.map((e) => e.entryId!) as number[];
+  const collected = ids.length
+    ? await prisma.dictionaryEntry.groupBy({
+        by: ["type"],
+        where: { id: { in: ids } },
+        _count: { _all: true },
+      })
+    : [];
+
+  const totalByType = new Map(totals.map((t) => [t.type, t._count._all]));
+  const collByType = new Map(collected.map((c) => [c.type, c._count._all]));
+
+  return COVERAGE_ORDER.filter((t) => (totalByType.get(t) ?? 0) > 0).map((t) => {
+    const total = totalByType.get(t) ?? 0;
+    const col = collByType.get(t) ?? 0;
+    return {
+      type: t as WordType,
+      label: TYPE_PLURAL[t] ?? t,
+      collected: col,
+      total,
+      pct: total > 0 ? Math.round((col / total) * 1000) / 10 : 0,
+    };
+  });
+}
+
 /** Number of spaced-repetition forms currently due for this user (SRS "Réviser" queue). */
 export async function dueReviewCount(userId: string): Promise<number> {
   return prisma.formReview.count({

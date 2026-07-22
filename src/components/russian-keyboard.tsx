@@ -191,7 +191,9 @@ export function RussianInput({
           // Portaled to <body> so `fixed` anchors to the viewport, not a glass ancestor
           // (backdrop-filter would otherwise trap fixed positioning inside the card).
           <div
-            className="fixed inset-x-0 bottom-0 z-50 border-t border-white/15 bg-[oklch(0.17_0.03_280)] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_40px_oklch(0.05_0.05_280/0.6)]"
+            // Hidden on mobile: the device's native keyboard is used there. Shown from sm+ where
+            // there's no touch keyboard and the on-screen Cyrillic keys help.
+            className="fixed inset-x-0 bottom-0 z-50 hidden border-t border-white/15 bg-[oklch(0.17_0.03_280)] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_40px_oklch(0.05_0.05_280/0.6)] sm:block"
             // Don't steal focus from the input when pressing keys.
             onMouseDown={(e) => e.preventDefault()}
           >
