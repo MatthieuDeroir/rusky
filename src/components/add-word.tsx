@@ -121,11 +121,13 @@ export function AddWord() {
   const singleToken = word.trim().split(/\s+/).filter(Boolean).length <= 1;
   const noMatch = groups !== null && !isSearching && allMatches.length === 0;
 
-  function save() {
-    if (addable.length === 0 || !groups) return;
+  function save(src: DetectedWord[] | null = groups) {
+    if (!src) return;
+    const toAddAny = src.flatMap((g) => g.matches).some((m) => !m.alreadyAdded);
+    if (!toAddAny) return;
     startSave(async () => {
       let addedWords = 0;
-      for (const g of groups) {
+      for (const g of src) {
         const toAdd = g.matches.filter((m) => !m.alreadyAdded);
         if (toAdd.length === 0) continue;
         for (const m of toAdd) {
@@ -137,7 +139,7 @@ export function AddWord() {
         }
         addedWords += 1;
       }
-      const lastEntryId = groups.at(-1)?.matches.at(-1)?.entryId ?? null;
+      const lastEntryId = src.at(-1)?.matches.at(-1)?.entryId ?? null;
       toast.success(
         addedWords === 1 ? "1 mot ajouté." : `${addedWords} mots ajoutés.`,
         addedWords === 1 && lastEntryId
@@ -155,6 +157,25 @@ export function AddWord() {
       // refocus the field to chain words; while listening, don't steal focus.
       reset();
       if (!listening) setTimeout(() => wordRef.current?.focus(), 0);
+    });
+  }
+
+  // Add button / Enter: use current matches, or detect first if the debounce hasn't fired yet.
+  function submitAdd() {
+    if (isSaving) return;
+    const q = word.trim();
+    if (!q) return;
+    if (groups) {
+      if (addable.length > 0) save();
+      else if (noMatch && singleToken) saveUnmatched();
+      return;
+    }
+    if (debounce.current) clearTimeout(debounce.current);
+    startSearch(async () => {
+      const g = await detectSentenceAction(q);
+      setGroups(g);
+      const addableNow = g.flatMap((x) => x.matches).filter((m) => !m.alreadyAdded);
+      if (addableNow.length > 0) save(g);
     });
   }
 
@@ -200,17 +221,34 @@ export function AddWord() {
             </Button>
           )}
         </div>
-        <RussianInput
-          id="word"
-          inputRef={wordRef}
-          value={word}
-          onValueChange={onChangeWord}
-          placeholder="ex. книги, читал… ou dicte une phrase entière"
-          autoFocus
-          autoComplete="off"
-          spellCheck={false}
-          className="mt-2 h-14 border-white/15 bg-white/5 text-2xl"
-        />
+        {/* Enter submits the form (unless a Cyrillic suggestion is open — handled by RussianInput). */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitAdd();
+          }}
+          className="mt-2 flex items-stretch gap-2"
+        >
+          <RussianInput
+            id="word"
+            inputRef={wordRef}
+            value={word}
+            onValueChange={onChangeWord}
+            placeholder="ex. книги, читал…"
+            autoFocus
+            autoComplete="off"
+            spellCheck={false}
+            className="h-14 flex-1 border-white/15 bg-white/5 text-2xl"
+          />
+          <Button
+            type="submit"
+            size="lg"
+            disabled={isSaving || !word.trim()}
+            className="h-14 shrink-0 px-5"
+          >
+            {isSaving ? "…" : "Ajouter"}
+          </Button>
+        </form>
         {interim && (
           <p className="mt-1 px-1 text-sm italic text-foreground/40">{interim}…</p>
         )}
@@ -304,7 +342,7 @@ export function AddWord() {
 
           <div className="pt-2">
             <Button
-              onClick={save}
+              onClick={() => save()}
               disabled={isSaving || addable.length === 0}
               size="lg"
               className="w-full sm:ml-auto sm:w-auto"
