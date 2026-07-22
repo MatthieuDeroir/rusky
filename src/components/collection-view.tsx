@@ -1,0 +1,252 @@
+"use client";
+
+import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  displayAccent,
+  normalizeBare,
+  normalizeFr,
+  WORD_TYPE_LABELS,
+  type WordType,
+} from "@/lib/grammar";
+import type { CollectionItem } from "@/lib/queries";
+import { deleteWordAction } from "@/app/actions";
+import { ProgressRing } from "@/components/progress-ring";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { SpeakButton } from "@/components/speak-button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+
+const TYPE_ORDER: WordType[] = [
+  "noun",
+  "verb",
+  "adjective",
+  "pronoun",
+  "numeral",
+  "other",
+];
+
+type Filter = WordType | "all";
+
+interface TypeStat {
+  type: WordType;
+  count: number;
+  discovered: number;
+  total: number;
+}
+
+type Sort = "alpha" | "recent";
+
+export function CollectionView({ items }: { items: CollectionItem[] }) {
+  const [filter, setFilter] = useState<Filter>("all");
+  const [sort, setSort] = useState<Sort>("alpha");
+  const [query, setQuery] = useState("");
+  const [pending, setPending] = useState<CollectionItem | null>(null);
+  const [isDeleting, startDelete] = useTransition();
+  const router = useRouter();
+
+  const confirmDelete = () => {
+    const target = pending;
+    if (!target) return;
+    startDelete(async () => {
+      try {
+        await deleteWordAction(target.id);
+        toast.success(`« ${displayAccent(target.accented)} » supprimé.`);
+        setPending(null);
+        router.refresh();
+      } catch {
+        toast.error("Échec de la suppression.");
+      }
+    });
+  };
+
+  const { stats, overall } = useMemo(() => {
+    const map = new Map<WordType, TypeStat>();
+    let dAll = 0;
+    let tAll = 0;
+    for (const it of items) {
+      const s = map.get(it.type) ?? { type: it.type, count: 0, discovered: 0, total: 0 };
+      s.count += 1;
+      s.discovered += it.discovered;
+      s.total += it.total;
+      map.set(it.type, s);
+      dAll += it.discovered;
+      tAll += it.total;
+    }
+    const stats = TYPE_ORDER.filter((t) => map.has(t)).map((t) => map.get(t)!);
+    return { stats, overall: { discovered: dAll, total: tAll } };
+  }, [items]);
+
+  const q = query.trim();
+  const qBare = normalizeBare(q); // matches the Russian word
+  const qFr = normalizeFr(q); // matches the French translation
+  const matchesSearch = (it: CollectionItem) =>
+    !q ||
+    normalizeBare(it.bare).includes(qBare) ||
+    (!!it.translationsFr && normalizeFr(it.translationsFr).includes(qFr));
+
+  const bySort = (a: CollectionItem, b: CollectionItem) =>
+    sort === "recent" ? b.firstSeen - a.firstSeen : a.bare.localeCompare(b.bare, "ru");
+
+  const shown = items
+    .filter((it) => filter === "all" || it.type === filter)
+    .filter(matchesSearch);
+  const shownGrouped = TYPE_ORDER.filter((t) => shown.some((i) => i.type === t)).map(
+    (t) => [t, shown.filter((i) => i.type === t).sort(bySort)] as const,
+  );
+
+  const pct = (d: number, t: number) => (t > 0 ? Math.round((d / t) * 100) : 0);
+
+  return (
+    <div className="space-y-8">
+      {/* Per-type completion gauges (click to filter) */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <button
+          type="button"
+          onClick={() => setFilter("all")}
+          className={`glass glass-lift flex items-center gap-3 rounded-2xl p-4 text-left ${
+            filter === "all" ? "ring-2 ring-primary/70" : ""
+          }`}
+        >
+          <ProgressRing value={overall.discovered} total={overall.total} size={48} />
+          <div>
+            <div className="font-medium">Tout</div>
+            <div className="text-xs text-foreground/55">
+              {items.length} mot{items.length > 1 ? "s" : ""} · {pct(overall.discovered, overall.total)}%
+            </div>
+          </div>
+        </button>
+
+        {stats.map((s) => (
+          <button
+            key={s.type}
+            type="button"
+            onClick={() => setFilter(s.type)}
+            className={`glass glass-lift flex items-center gap-3 rounded-2xl p-4 text-left ${
+              filter === s.type ? "ring-2 ring-primary/70" : ""
+            }`}
+          >
+            <ProgressRing value={s.discovered} total={s.total} size={48} />
+            <div>
+              <div className="font-medium">{WORD_TYPE_LABELS[s.type]}s</div>
+              <div className="text-xs text-foreground/55">
+                {s.count} · {s.total > 0 ? `${pct(s.discovered, s.total)}%` : "—"}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Search (French or Russian) + sort */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Rechercher (français ou русский)…"
+          autoComplete="off"
+          spellCheck={false}
+          className="h-11 flex-1 border-white/15 bg-white/5"
+        />
+        <div className="flex h-11 shrink-0 items-center rounded-xl bg-white/5 p-1 text-sm ring-1 ring-white/10">
+          {(
+            [
+              ["alpha", "A→Я"],
+              ["recent", "Récents"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSort(key)}
+              className={`rounded-lg px-3 py-1.5 transition-colors ${
+                sort === key
+                  ? "bg-white/15 text-foreground"
+                  : "text-foreground/55 hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {q && shown.length === 0 && (
+        <p className="text-center text-sm text-foreground/50">
+          Aucun mot pour « {q} ».
+        </p>
+      )}
+
+      {/* Filtered, grouped word cards */}
+      {shownGrouped.map(([type, list]) => (
+        <section key={type} className="space-y-3">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-foreground/50">
+            {WORD_TYPE_LABELS[type]}s · {list.length}
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {list.map((it) => (
+              <div key={it.id} className="group relative">
+                <Link
+                  href={`/word/${it.id}`}
+                  className="glass glass-lift flex items-center justify-between rounded-2xl p-4 hover:bg-white/10"
+                >
+                  <div className="min-w-0 pr-6">
+                    <div className="truncate font-display text-2xl">
+                      {displayAccent(it.accented)}
+                    </div>
+                    {it.translationsFr && (
+                      <div className="truncate text-sm text-foreground/55">
+                        {it.translationsFr}
+                      </div>
+                    )}
+                  </div>
+                  {it.total > 0 ? (
+                    <ProgressRing value={it.discovered} total={it.total} />
+                  ) : (
+                    <Badge variant="secondary" className="bg-white/10 text-xs">
+                      invariable
+                    </Badge>
+                  )}
+                </Link>
+                <SpeakButton
+                  text={it.accented}
+                  className="absolute right-11 top-2 h-8 w-8 rounded-lg bg-[oklch(0.17_0.03_280)]/70 opacity-0 backdrop-blur-sm transition-all focus-visible:opacity-100 group-hover:opacity-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPending(it)}
+                  aria-label={`Supprimer ${it.bare}`}
+                  title="Supprimer de ma collection"
+                  className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-lg bg-[oklch(0.17_0.03_280)]/70 text-foreground/45 opacity-0 backdrop-blur-sm transition-all hover:bg-destructive/25 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      <ConfirmDialog
+        open={pending !== null}
+        destructive
+        busy={isDeleting}
+        title="Supprimer ce mot ?"
+        description={
+          pending && (
+            <>
+              «&nbsp;<span className="font-medium text-foreground">{displayAccent(pending.accented)}</span>&nbsp;»
+              sera retiré de ta collection, avec ses cases découvertes et son historique de
+              quiz. Le dictionnaire de référence n’est pas touché. Cette action est définitive.
+            </>
+          )
+        }
+        confirmLabel="Supprimer"
+        onConfirm={confirmDelete}
+        onCancel={() => !isDeleting && setPending(null)}
+      />
+    </div>
+  );
+}

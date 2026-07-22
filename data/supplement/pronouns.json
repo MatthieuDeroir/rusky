@@ -1,0 +1,144 @@
+{
+  "type": "pronoun",
+  "note": "Personal, reflexive and interrogative/negative pronouns with full case paradigms. Forms in parentheses after a slash are the н-prefixed variants used after prepositions; they are stored as separate variants. Keys: prn_nom, prn_gen, prn_dat, prn_acc, prn_inst, prn_prep.",
+  "entries": [
+    {
+      "accented": "я",
+      "translationsEn": "I",
+      "forms": {
+        "prn_nom": "я",
+        "prn_gen": "меня'",
+        "prn_dat": "мне",
+        "prn_acc": "меня'",
+        "prn_inst": "мно'й, мно'ю",
+        "prn_prep": "мне"
+      }
+    },
+    {
+      "accented": "ты",
+      "translationsEn": "you (sg.)",
+      "forms": {
+        "prn_nom": "ты",
+        "prn_gen": "тебя'",
+        "prn_dat": "тебе'",
+        "prn_acc": "тебя'",
+        "prn_inst": "тобо'й, тобо'ю",
+        "prn_prep": "тебе'"
+      }
+    },
+    {
+      "accented": "он",
+      "translationsEn": "he / she / it / they",
+      "note": "3rd-person personal pronoun: one entry declined by gender/number (m=он, f=она, n=оно, pl=они). Comma variants are the н-prefixed forms used after prepositions.",
+      "forms": {
+        "decl_m_nom": "он",
+        "decl_m_gen": "его', него'",
+        "decl_m_dat": "ему', нему'",
+        "decl_m_acc": "его', него'",
+        "decl_m_inst": "им, ним",
+        "decl_m_prep": "нём",
+        "decl_f_nom": "она'",
+        "decl_f_gen": "её, неё",
+        "decl_f_dat": "ей, ней",
+        "decl_f_acc": "её, неё",
+        "decl_f_inst": "ей, е'ю, ней, не'ю",
+        "decl_f_prep": "ней",
+        "decl_n_nom": "оно'",
+        "decl_n_gen": "его', него'",
+        "decl_n_dat": "ему', нему'",
+        "decl_n_acc": "его', него'",
+        "decl_n_inst": "им, ним",
+        "decl_n_prep": "нём",
+        "decl_pl_nom": "они'",
+        "decl_pl_gen": "их, них",
+        "decl_pl_dat": "им, ним",
+        "decl_pl_acc": "их, них",
+        "decl_pl_inst": "и'ми, ни'ми",
+        "decl_pl_prep": "них"
+      }
+    },
+    {
+      "accented": "мы",
+      "translationsEn": "we",
+      "forms": {
+        "prn_nom": "мы",
+        "prn_gen": "нас",
+        "prn_dat": "нам",
+        "prn_acc": "нас",
+        "prn_inst": "на'ми",
+        "prn_prep": "нас"
+      }
+    },
+    {
+      "accented": "вы",
+      "translationsEn": "you (pl./formal)",
+      "forms": {
+        "prn_nom": "вы",
+        "prn_gen": "вас",
+        "prn_dat": "вам",
+        "prn_acc": "вас",
+        "prn_inst": "ва'ми",
+        "prn_prep": "вас"
+      }
+    },
+    {
+      "accented": "себя'",
+      "translationsEn": "oneself (reflexive)",
+      "forms": {
+        "prn_gen": "себя'",
+        "prn_dat": "себе'",
+        "prn_acc": "себя'",
+        "prn_inst": "собо'й, собо'ю",
+        "prn_prep": "себе'"
+      }
+    },
+    {
+      "accented": "кто",
+      "translationsEn": "who",
+      "forms": {
+        "prn_nom": "кто",
+        "prn_gen": "кого'",
+        "prn_dat": "кому'",
+        "prn_acc": "кого'",
+        "prn_inst": "кем",
+        "prn_prep": "ком"
+      }
+    },
+    {
+      "accented": "что",
+      "translationsEn": "what",
+      "forms": {
+        "prn_nom": "что",
+        "prn_gen": "чего'",
+        "prn_dat": "чему'",
+        "prn_acc": "что",
+        "prn_inst": "чем",
+        "prn_prep": "чём"
+      }
+    },
+    {
+      "accented": "никто'",
+      "translationsEn": "nobody",
+      "forms": {
+        "prn_nom": "никто'",
+        "prn_gen": "никого'",
+        "prn_dat": "никому'",
+        "prn_acc": "никого'",
+        "prn_inst": "нике'м",
+        "prn_prep": "ни о ко'м"
+      }
+    },
+    {
+      "accented": "ничто'",
+      "translationsEn": "nothing",
+      "forms": {
+        "prn_nom": "ничто'",
+        "prn_gen": "ничего'",
+        "prn_dat": "ничему'",
+        "prn_acc": "ничто'",
+        "prn_inst": "ниче'м",
+        "prn_prep": "ни о чём"
+      }
+    }
+  ]
+}

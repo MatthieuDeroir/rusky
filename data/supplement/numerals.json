@@ -1,0 +1,252 @@
+{
+  "type": "numeral",
+  "note": "Cardinal and collective numerals with full case paradigms. Most use keys num_nom..num_prep (single column, accusative carries animate/inanimate variants where relevant). 'один' agrees in gender/number and uses adjective-style keys decl_{m,f,n,pl}_{case}.",
+  "entries": [
+    {
+      "accented": "оди'н",
+      "translationsEn": "one",
+      "forms": {
+        "decl_m_nom": "оди'н",
+        "decl_m_gen": "одного'",
+        "decl_m_dat": "одному'",
+        "decl_m_acc": "оди'н, одного'",
+        "decl_m_inst": "одни'м",
+        "decl_m_prep": "одно'м",
+        "decl_f_nom": "одна'",
+        "decl_f_gen": "одно'й",
+        "decl_f_dat": "одно'й",
+        "decl_f_acc": "одну'",
+        "decl_f_inst": "одно'й, одно'ю",
+        "decl_f_prep": "одно'й",
+        "decl_n_nom": "одно'",
+        "decl_n_gen": "одного'",
+        "decl_n_dat": "одному'",
+        "decl_n_acc": "одно'",
+        "decl_n_inst": "одни'м",
+        "decl_n_prep": "одно'м",
+        "decl_pl_nom": "одни'",
+        "decl_pl_gen": "одни'х",
+        "decl_pl_dat": "одни'м",
+        "decl_pl_acc": "одни', одни'х",
+        "decl_pl_inst": "одни'ми",
+        "decl_pl_prep": "одни'х"
+      }
+    },
+    {
+      "accented": "два",
+      "translationsEn": "two",
+      "forms": {
+        "num_nom": "два, две",
+        "num_gen": "двух",
+        "num_dat": "двум",
+        "num_acc": "два, две, двух",
+        "num_inst": "двумя'",
+        "num_prep": "двух"
+      }
+    },
+    {
+      "accented": "три",
+      "translationsEn": "three",
+      "forms": {
+        "num_nom": "три",
+        "num_gen": "трёх",
+        "num_dat": "трём",
+        "num_acc": "три, трёх",
+        "num_inst": "тремя'",
+        "num_prep": "трёх"
+      }
+    },
+    {
+      "accented": "четы'ре",
+      "translationsEn": "four",
+      "forms": {
+        "num_nom": "четы'ре",
+        "num_gen": "четырёх",
+        "num_dat": "четырём",
+        "num_acc": "четы'ре, четырёх",
+        "num_inst": "четырьмя'",
+        "num_prep": "четырёх"
+      }
+    },
+    {
+      "accented": "пять",
+      "translationsEn": "five",
+      "forms": { "num_nom": "пять", "num_gen": "пяти'", "num_dat": "пяти'", "num_acc": "пять", "num_inst": "пятью'", "num_prep": "пяти'" }
+    },
+    {
+      "accented": "шесть",
+      "translationsEn": "six",
+      "forms": { "num_nom": "шесть", "num_gen": "шести'", "num_dat": "шести'", "num_acc": "шесть", "num_inst": "шестью'", "num_prep": "шести'" }
+    },
+    {
+      "accented": "семь",
+      "translationsEn": "seven",
+      "forms": { "num_nom": "семь", "num_gen": "семи'", "num_dat": "семи'", "num_acc": "семь", "num_inst": "семью'", "num_prep": "семи'" }
+    },
+    {
+      "accented": "во'семь",
+      "translationsEn": "eight",
+      "forms": { "num_nom": "во'семь", "num_gen": "восьми'", "num_dat": "восьми'", "num_acc": "во'семь", "num_inst": "восьмью', восемью'", "num_prep": "восьми'" }
+    },
+    {
+      "accented": "де'вять",
+      "translationsEn": "nine",
+      "forms": { "num_nom": "де'вять", "num_gen": "девяти'", "num_dat": "девяти'", "num_acc": "де'вять", "num_inst": "девятью'", "num_prep": "девяти'" }
+    },
+    {
+      "accented": "де'сять",
+      "translationsEn": "ten",
+      "forms": { "num_nom": "де'сять", "num_gen": "десяти'", "num_dat": "десяти'", "num_acc": "де'сять", "num_inst": "десятью'", "num_prep": "десяти'" }
+    },
+    {
+      "accented": "оди'ннадцать",
+      "translationsEn": "eleven",
+      "forms": { "num_nom": "оди'ннадцать", "num_gen": "оди'ннадцати", "num_dat": "оди'ннадцати", "num_acc": "оди'ннадцать", "num_inst": "оди'ннадцатью", "num_prep": "оди'ннадцати" }
+    },
+    {
+      "accented": "двена'дцать",
+      "translationsEn": "twelve",
+      "forms": { "num_nom": "двена'дцать", "num_gen": "двена'дцати", "num_dat": "двена'дцати", "num_acc": "двена'дцать", "num_inst": "двена'дцатью", "num_prep": "двена'дцати" }
+    },
+    {
+      "accented": "трина'дцать",
+      "translationsEn": "thirteen",
+      "forms": { "num_nom": "трина'дцать", "num_gen": "трина'дцати", "num_dat": "трина'дцати", "num_acc": "трина'дцать", "num_inst": "трина'дцатью", "num_prep": "трина'дцати" }
+    },
+    {
+      "accented": "четы'рнадцать",
+      "translationsEn": "fourteen",
+      "forms": { "num_nom": "четы'рнадцать", "num_gen": "четы'рнадцати", "num_dat": "четы'рнадцати", "num_acc": "четы'рнадцать", "num_inst": "четы'рнадцатью", "num_prep": "четы'рнадцати" }
+    },
+    {
+      "accented": "пятна'дцать",
+      "translationsEn": "fifteen",
+      "forms": { "num_nom": "пятна'дцать", "num_gen": "пятна'дцати", "num_dat": "пятна'дцати", "num_acc": "пятна'дцать", "num_inst": "пятна'дцатью", "num_prep": "пятна'дцати" }
+    },
+    {
+      "accented": "шестна'дцать",
+      "translationsEn": "sixteen",
+      "forms": { "num_nom": "шестна'дцать", "num_gen": "шестна'дцати", "num_dat": "шестна'дцати", "num_acc": "шестна'дцать", "num_inst": "шестна'дцатью", "num_prep": "шестна'дцати" }
+    },
+    {
+      "accented": "семна'дцать",
+      "translationsEn": "seventeen",
+      "forms": { "num_nom": "семна'дцать", "num_gen": "семна'дцати", "num_dat": "семна'дцати", "num_acc": "семна'дцать", "num_inst": "семна'дцатью", "num_prep": "семна'дцати" }
+    },
+    {
+      "accented": "восемна'дцать",
+      "translationsEn": "eighteen",
+      "forms": { "num_nom": "восемна'дцать", "num_gen": "восемна'дцати", "num_dat": "восемна'дцати", "num_acc": "восемна'дцать", "num_inst": "восемна'дцатью", "num_prep": "восемна'дцати" }
+    },
+    {
+      "accented": "девятна'дцать",
+      "translationsEn": "nineteen",
+      "forms": { "num_nom": "девятна'дцать", "num_gen": "девятна'дцати", "num_dat": "девятна'дцати", "num_acc": "девятна'дцать", "num_inst": "девятна'дцатью", "num_prep": "девятна'дцати" }
+    },
+    {
+      "accented": "два'дцать",
+      "translationsEn": "twenty",
+      "forms": { "num_nom": "два'дцать", "num_gen": "двадцати'", "num_dat": "двадцати'", "num_acc": "два'дцать", "num_inst": "двадцатью'", "num_prep": "двадцати'" }
+    },
+    {
+      "accented": "три'дцать",
+      "translationsEn": "thirty",
+      "forms": { "num_nom": "три'дцать", "num_gen": "тридцати'", "num_dat": "тридцати'", "num_acc": "три'дцать", "num_inst": "тридцатью'", "num_prep": "тридцати'" }
+    },
+    {
+      "accented": "со'рок",
+      "translationsEn": "forty",
+      "forms": { "num_nom": "со'рок", "num_gen": "сорока'", "num_dat": "сорока'", "num_acc": "со'рок", "num_inst": "сорока'", "num_prep": "сорока'" }
+    },
+    {
+      "accented": "пятьдеся'т",
+      "translationsEn": "fifty",
+      "forms": { "num_nom": "пятьдеся'т", "num_gen": "пяти'десяти", "num_dat": "пяти'десяти", "num_acc": "пятьдеся'т", "num_inst": "пятью'десятью", "num_prep": "пяти'десяти" }
+    },
+    {
+      "accented": "шестьдеся'т",
+      "translationsEn": "sixty",
+      "forms": { "num_nom": "шестьдеся'т", "num_gen": "шести'десяти", "num_dat": "шести'десяти", "num_acc": "шестьдеся'т", "num_inst": "шестью'десятью", "num_prep": "шести'десяти" }
+    },
+    {
+      "accented": "се'мьдесят",
+      "translationsEn": "seventy",
+      "forms": { "num_nom": "се'мьдесят", "num_gen": "семи'десяти", "num_dat": "семи'десяти", "num_acc": "се'мьдесят", "num_inst": "семью'десятью", "num_prep": "семи'десяти" }
+    },
+    {
+      "accented": "во'семьдесят",
+      "translationsEn": "eighty",
+      "forms": { "num_nom": "во'семьдесят", "num_gen": "восьми'десяти", "num_dat": "восьми'десяти", "num_acc": "во'семьдесят", "num_inst": "восемью'десятью, восьмью'десятью", "num_prep": "восьми'десяти" }
+    },
+    {
+      "accented": "девяно'сто",
+      "translationsEn": "ninety",
+      "forms": { "num_nom": "девяно'сто", "num_gen": "девяно'ста", "num_dat": "девяно'ста", "num_acc": "девяно'сто", "num_inst": "девяно'ста", "num_prep": "девяно'ста" }
+    },
+    {
+      "accented": "сто",
+      "translationsEn": "one hundred",
+      "forms": { "num_nom": "сто", "num_gen": "ста", "num_dat": "ста", "num_acc": "сто", "num_inst": "ста", "num_prep": "ста" }
+    },
+    {
+      "accented": "две'сти",
+      "translationsEn": "two hundred",
+      "forms": { "num_nom": "две'сти", "num_gen": "двухсо'т", "num_dat": "двумста'м", "num_acc": "две'сти", "num_inst": "двумяста'ми", "num_prep": "двухста'х" }
+    },
+    {
+      "accented": "три'ста",
+      "translationsEn": "three hundred",
+      "forms": { "num_nom": "три'ста", "num_gen": "трёхсо'т", "num_dat": "трёмста'м", "num_acc": "три'ста", "num_inst": "тремяста'ми", "num_prep": "трёхста'х" }
+    },
+    {
+      "accented": "четы'реста",
+      "translationsEn": "four hundred",
+      "forms": { "num_nom": "четы'реста", "num_gen": "четырёхсо'т", "num_dat": "четырёмста'м", "num_acc": "четы'реста", "num_inst": "четырьмяста'ми", "num_prep": "четырёхста'х" }
+    },
+    {
+      "accented": "пятьсо'т",
+      "translationsEn": "five hundred",
+      "forms": { "num_nom": "пятьсо'т", "num_gen": "пятисо'т", "num_dat": "пятиста'м", "num_acc": "пятьсо'т", "num_inst": "пятьюста'ми", "num_prep": "пятиста'х" }
+    },
+    {
+      "accented": "шестьсо'т",
+      "translationsEn": "six hundred",
+      "forms": { "num_nom": "шестьсо'т", "num_gen": "шестисо'т", "num_dat": "шестиста'м", "num_acc": "шестьсо'т", "num_inst": "шестьюста'ми", "num_prep": "шестиста'х" }
+    },
+    {
+      "accented": "семьсо'т",
+      "translationsEn": "seven hundred",
+      "forms": { "num_nom": "семьсо'т", "num_gen": "семисо'т", "num_dat": "семиста'м", "num_acc": "семьсо'т", "num_inst": "семьюста'ми", "num_prep": "семиста'х" }
+    },
+    {
+      "accented": "восемьсо'т",
+      "translationsEn": "eight hundred",
+      "forms": { "num_nom": "восемьсо'т", "num_gen": "восьмисо'т", "num_dat": "восьмиста'м", "num_acc": "восемьсо'т", "num_inst": "восемью'ста'ми, восьмьюста'ми", "num_prep": "восьмиста'х" }
+    },
+    {
+      "accented": "девятьсо'т",
+      "translationsEn": "nine hundred",
+      "forms": { "num_nom": "девятьсо'т", "num_gen": "девятисо'т", "num_dat": "девятиста'м", "num_acc": "девятьсо'т", "num_inst": "девятьюста'ми", "num_prep": "девятиста'х" }
+    },
+    {
+      "accented": "дво'е",
+      "translationsEn": "two (collective)",
+      "forms": { "num_nom": "дво'е", "num_gen": "двои'х", "num_dat": "двои'м", "num_acc": "дво'е, двои'х", "num_inst": "двои'ми", "num_prep": "двои'х" }
+    },
+    {
+      "accented": "тро'е",
+      "translationsEn": "three (collective)",
+      "forms": { "num_nom": "тро'е", "num_gen": "трои'х", "num_dat": "трои'м", "num_acc": "тро'е, трои'х", "num_inst": "трои'ми", "num_prep": "трои'х" }
+    },
+    {
+      "accented": "че'тверо",
+      "translationsEn": "four (collective)",
+      "forms": { "num_nom": "че'тверо", "num_gen": "четверы'х", "num_dat": "четверы'м", "num_acc": "че'тверо, четверы'х", "num_inst": "четверы'ми", "num_prep": "четверы'х" }
+    },
+    {
+      "accented": "пя'теро",
+      "translationsEn": "five (collective)",
+      "forms": { "num_nom": "пя'теро", "num_gen": "пятеры'х", "num_dat": "пятеры'м", "num_acc": "пя'теро, пятеры'х", "num_inst": "пятеры'ми", "num_prep": "пятеры'х" }
+    }
+  ]
+}

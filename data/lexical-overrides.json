@@ -1,0 +1,31 @@
+{
+  "note": "Corrections appliquées au seed. translationsFr forcé. Avec 'fromType', l'entrée est RECLASSÉE (type corrigé) — utile pour les mots qu'OpenRussian range mal (ex. как listé comme adjectif alors qu'il est invariable). Sans 'fromType', seule la traduction est corrigée (ex. есть existentiel).",
+  "entries": [
+    {
+      "bare": "есть",
+      "type": "other",
+      "translationsFr": "il y a, il existe ; (у + génitif) avoir"
+    },
+    {
+      "bare": "как",
+      "fromType": "adjective",
+      "type": "other",
+      "translationsFr": "comment, comme"
+    },
+    {
+      "bare": "деть",
+      "type": "verb",
+      "translationsFr": "mettre quelque part, fourrer"
+    },
+    {
+      "bare": "девать",
+      "type": "verb",
+      "translationsFr": "mettre quelque part, fourrer (imperfectif)"
+    },
+    {
+      "bare": "пожаловать",
+      "type": "verb",
+      "translationsFr": "accorder, octroyer, gratifier (de) ; daigner venir (cf. добро пожаловать = bienvenue)"
+    }
+  ]
+}

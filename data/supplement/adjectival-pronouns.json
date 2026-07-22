@@ -1,0 +1,66 @@
+{
+  "type": "pronoun",
+  "note": "Adjectival (possessive) pronouns missing from adjectives.csv. They decline like adjectives, so they use adjective-style keys decl_{m,f,n,pl}_{case}.",
+  "entries": [
+    {
+      "accented": "наш",
+      "translationsEn": "our",
+      "forms": {
+        "decl_m_nom": "наш",
+        "decl_m_gen": "на'шего",
+        "decl_m_dat": "на'шему",
+        "decl_m_acc": "наш, на'шего",
+        "decl_m_inst": "на'шим",
+        "decl_m_prep": "на'шем",
+        "decl_f_nom": "на'ша",
+        "decl_f_gen": "на'шей",
+        "decl_f_dat": "на'шей",
+        "decl_f_acc": "на'шу",
+        "decl_f_inst": "на'шей, на'шею",
+        "decl_f_prep": "на'шей",
+        "decl_n_nom": "на'ше",
+        "decl_n_gen": "на'шего",
+        "decl_n_dat": "на'шему",
+        "decl_n_acc": "на'ше",
+        "decl_n_inst": "на'шим",
+        "decl_n_prep": "на'шем",
+        "decl_pl_nom": "на'ши",
+        "decl_pl_gen": "на'ших",
+        "decl_pl_dat": "на'шим",
+        "decl_pl_acc": "на'ши, на'ших",
+        "decl_pl_inst": "на'шими",
+        "decl_pl_prep": "на'ших"
+      }
+    },
+    {
+      "accented": "ваш",
+      "translationsEn": "your (pl./formal)",
+      "forms": {
+        "decl_m_nom": "ваш",
+        "decl_m_gen": "ва'шего",
+        "decl_m_dat": "ва'шему",
+        "decl_m_acc": "ваш, ва'шего",
+        "decl_m_inst": "ва'шим",
+        "decl_m_prep": "ва'шем",
+        "decl_f_nom": "ва'ша",
+        "decl_f_gen": "ва'шей",
+        "decl_f_dat": "ва'шей",
+        "decl_f_acc": "ва'шу",
+        "decl_f_inst": "ва'шей, ва'шею",
+        "decl_f_prep": "ва'шей",
+        "decl_n_nom": "ва'ше",
+        "decl_n_gen": "ва'шего",
+        "decl_n_dat": "ва'шему",
+        "decl_n_acc": "ва'ше",
+        "decl_n_inst": "ва'шим",
+        "decl_n_prep": "ва'шем",
+        "decl_pl_nom": "ва'ши",
+        "decl_pl_gen": "ва'ших",
+        "decl_pl_dat": "ва'шим",
+        "decl_pl_acc": "ва'ши, ва'ших",
+        "decl_pl_inst": "ва'шими",
+        "decl_pl_prep": "ва'ших"
+      }
+    }
+  ]
+}

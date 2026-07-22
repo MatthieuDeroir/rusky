@@ -1,0 +1,16 @@
+{
+  "note": "Corrections of present/future (or other) verb forms missing or wrong in OpenRussian. Applied to the existing verb entry (matched by bare form) during seeding: the listed formKeys are replaced. быть's presfut columns hold the archaic present «есть» instead of the future бу́ду…, so we supply the future.",
+  "verbs": [
+    {
+      "bare": "быть",
+      "forms": {
+        "presfut_sg1": "бу'ду",
+        "presfut_sg2": "бу'дешь",
+        "presfut_sg3": "бу'дет",
+        "presfut_pl1": "бу'дем",
+        "presfut_pl2": "бу'дете",
+        "presfut_pl3": "бу'дут"
+      }
+    }
+  ]
+}

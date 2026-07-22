@@ -1,0 +1,65 @@
+import { redirect } from "next/navigation";
+import { auth, signIn, devBypass } from "@/lib/auth";
+import { Button } from "@/components/ui/button";
+
+export const metadata = { title: "Connexion · Русский" };
+
+export default async function LoginPage() {
+  if (devBypass) redirect("/");
+  const session = await auth();
+  if (session?.user) redirect("/");
+
+  return (
+    <div className="mx-auto mt-10 flex max-w-md flex-col items-center">
+      <div className="relative grid size-16 place-items-center rounded-full border border-primary/40 font-display text-4xl leading-none text-primary">
+        Я
+        <span className="absolute -bottom-0.5 left-1/2 h-px w-7 -translate-x-1/2 bg-primary/60" />
+      </div>
+      <h1 className="mt-5 font-display text-3xl tracking-tight">Русский</h1>
+      <p className="mt-2 text-center text-sm text-foreground/60">
+        Construis ton dictionnaire russe au fil de tes lectures. Connecte-toi pour
+        retrouver ta progression sur tous tes appareils.
+      </p>
+
+      <div className="glass-strong mt-8 w-full rounded-3xl p-8 text-center">
+        <form
+          action={async () => {
+            "use server";
+            await signIn("google", { redirectTo: "/" });
+          }}
+        >
+          <Button type="submit" size="lg" className="w-full">
+            <GoogleGlyph />
+            Se connecter avec Google
+          </Button>
+        </form>
+        <p className="mt-4 text-xs text-foreground/45">
+          Tes données restent privées et rattachées à ton compte.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function GoogleGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="mr-2 size-5" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M23.52 12.27c0-.79-.07-1.54-.2-2.27H12v4.51h6.47a5.53 5.53 0 0 1-2.4 3.63v3h3.88c2.27-2.09 3.57-5.17 3.57-8.87z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.96-1.08 7.95-2.91l-3.88-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09A12 12 0 0 0 12 24z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.27 14.29a7.2 7.2 0 0 1 0-4.58V6.62H1.29a12 12 0 0 0 0 10.76l3.98-3.09z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.44-3.44A11.97 11.97 0 0 0 12 0 12 12 0 0 0 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"
+      />
+    </svg>
+  );
+}

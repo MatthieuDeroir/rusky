@@ -1,0 +1,228 @@
+// Russian Training — data model.
+// Reference data (DictionaryEntry / DictionaryForm) is read-only, seeded from the
+// OpenRussian dataset + curated supplement. User data (Encounter / QuizAttempt) is mutable.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+/// A dictionary word in its base (lemma) form. Seeded, never mutated by the user.
+model DictionaryEntry {
+  id             Int     @id @default(autoincrement())
+  bare           String // dictionary form without stress marks (lowercased, e folded)
+  accented       String // dictionary form with stress marks
+  type           String // 'noun' | 'verb' | 'adjective' | 'pronoun' | 'numeral' | 'other'
+  gender         String? // nouns/pronouns: 'm' | 'f' | 'n'
+  aspect         String? // verbs: 'imperfective' | 'perfective'
+  animate        Boolean?
+  indeclinable   Boolean?
+  sgOnly         Boolean?
+  plOnly         Boolean?
+  comparative    String?
+  superlative    String?
+  partner        String? // aspectual partner (verbs) or counterpart
+  translationsFr String?
+  frManual       Boolean @default(false) // true = user-entered FR translation (preserved across reseed)
+  translationsEn String?
+  translationsDe String?
+
+  forms      DictionaryForm[]
+  encounters Encounter[]
+  attempts   QuizAttempt[]
+
+  @@index([bare])
+  @@index([type])
+}
+
+/// A single inflected form of an entry. Also serves as the reverse-lookup index for detection.
+model DictionaryForm {
+  id           Int    @id @default(autoincrement())
+  entryId      Int
+  formKey      String // e.g. 'sg_gen', 'presfut_sg1', 'decl_f_acc', 'prn_gen', 'num_inst'
+  accented     String // form with stress marks
+  bareForm     String // normalized: stress stripped, lowercased, e variants folded
+  variantIndex Int    @default(0) // for comma-separated alternatives within one cell
+
+  entry DictionaryEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([bareForm])
+  @@index([entryId])
+}
+
+/// A word the user has encountered in their reading. Each row fills one paradigm cell.
+model Encounter {
+  id             Int      @id @default(autoincrement())
+  entryId        Int?
+  rawInput       String // exactly what the user typed
+  matchedFormKey String? // which paradigm cell this encounter discovered
+  source         String? // book / text the word came from
+  context        String? // the sentence it appeared in
+  createdAt      DateTime @default(now())
+
+  entry DictionaryEntry? @relation(fields: [entryId], references: [id], onDelete: SetNull)
+
+  // Owner of this encounter. Nullable so legacy rows survive the migration; they are
+  // claimed by the owner account on first login (see src/lib/auth.ts).
+  userId String?
+
+  @@index([entryId])
+  @@index([userId])
+}
+
+/// One practice attempt at filling a blank cell.
+model QuizAttempt {
+  id         Int      @id @default(autoincrement())
+  entryId    Int
+  formKey    String
+  userAnswer String
+  correct    Boolean
+  createdAt  DateTime @default(now())
+
+  entry DictionaryEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  userId String? // owner; nullable for legacy rows (claimed on first login)
+
+  @@index([entryId])
+  @@index([entryId, formKey])
+  @@index([userId])
+}
+
+/* ---------- Auth.js tables (standard @auth/prisma-adapter schema) ---------- */
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  accounts      Account[]
+  sessions      Session[]
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @id
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+/* ---------- Per-user app state (replaces the former JSON files) ---------- */
+
+/// Highest validated grammatical level per track. Replaces level-progress.json.
+model LevelProgress {
+  userId String
+  track  String // 'declension' | 'conjugation' | 'vocabulary'
+  level  Int
+
+  @@id([userId, track])
+}
+
+/// A passed TORFL production/comprehension task. Replaces torfl-progress.json.
+model TorflProgress {
+  userId String
+  taskId String
+
+  @@id([userId, taskId])
+}
+
+/// Cached Mistral exam recommendation, per user. Replaces reco-cache.json.
+model RecoCache {
+  userId    String   @id
+  signature String
+  reco      String // JSON-stringified recommendation
+  updatedAt DateTime @default(now())
+}
+
+/// Server-side correct answers of a generated QCM. Replaces exam-items.json.
+model ExamItem {
+  token     String   @id
+  userId    String
+  correct   String // JSON-stringified number[]
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/* ---------- Gamification (Duolingo mode) ---------- */
+
+/// Aggregate stats & streak per user.
+model UserStats {
+  userId           String  @id
+  currentStreak    Int     @default(0)
+  longestStreak    Int     @default(0)
+  lastActivityDate String? // "YYYY-MM-DD" in Europe/Paris
+  totalXp          Int     @default(0)
+  dailyXpGoal      Int     @default(50)
+  streakFreezes    Int     @default(2)
+  totalAttempts    Int     @default(0)
+}
+
+/// XP journal — source of truth for today's XP and history.
+model XpEvent {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  amount    Int
+  source    String // 'quiz' | 'complete' | 'translate' | 'case' | 'speak' | 'sentence' | 'control' | 'torfl' | 'discover' | 'review' | 'bonus'
+  day       String // "YYYY-MM-DD" in Europe/Paris
+  createdAt DateTime @default(now())
+
+  @@index([userId, day])
+}
+
+/// Unlocked achievements (static catalogue in code).
+model Achievement {
+  userId        String
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  @@id([userId, achievementId])
+}
+
+/// SM-2 spaced-repetition state for one inflected form, per user.
+model FormReview {
+  userId         String
+  entryId        Int
+  formKey        String
+  ease           Float     @default(2.5)
+  intervalDays   Float     @default(0)
+  repetitions    Int       @default(0)
+  lapses         Int       @default(0)
+  dueAt          DateTime
+  lastReviewedAt DateTime?
+
+  @@id([userId, entryId, formKey])
+  @@index([userId, dueAt])
+}
