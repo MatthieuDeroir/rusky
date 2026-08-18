@@ -209,12 +209,17 @@ export function VocabCard() {
                   )}
                 </>
               ) : (
-                <p className="text-red-300">
-                  Réponse attendue :{" "}
-                  <span className="font-semibold">
-                    {result.expected.map((v) => (toRussian ? displayAccent(v) : v)).join(" / ")}
-                  </span>
-                </p>
+                <>
+                  <p className="text-red-300">
+                    Réponse attendue :{" "}
+                    <span className="font-semibold">
+                      {result.expected.map((v) => (toRussian ? displayAccent(v) : v)).join(" / ")}
+                    </span>
+                  </p>
+                  {result.note && (
+                    <p className="mt-1 text-xs text-foreground/50">{result.note}</p>
+                  )}
+                </>
               )}
               <LevelPips result={result} />
             </div>

@@ -829,6 +829,10 @@ export async function submitPracticeAction(input: SubmitPracticeInput): Promise<
         correct = true;
         close = true;
         note = check.reason;
+      } else {
+        // Rejet : on garde quand même l'explication, c'est là qu'elle apprend le plus
+        // (« verbe au lieu d'adjectif », « mauvais cas »…).
+        note = check.reason;
       }
     }
   }
@@ -1225,6 +1229,10 @@ export async function submitVocabAction(input: {
       } else if (check.verdict === "close") {
         correct = true;
         close = true;
+        note = check.reason;
+      } else {
+        // Rejet : on garde quand même l'explication, c'est là qu'elle apprend le plus
+        // (« verbe au lieu d'adjectif », « mauvais cas »…).
         note = check.reason;
       }
     }
