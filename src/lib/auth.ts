@@ -53,36 +53,39 @@ const nextAuth = NextAuth({
 export const { handlers, signIn, signOut } = nextAuth;
 
 /* ---------- Local dev bypass (impossible in production) ---------- */
-// AUTH_DEV_BYPASS=1 in .env + NODE_ENV=development → a fake session, no Google needed.
-// On Vercel NODE_ENV is "production" and the var is absent, so this branch is dead there.
+// AUTH_DEV_BYPASS=1 in .env + NODE_ENV=development → a session for the OWNER account, no
+// Google round-trip needed. On Vercel NODE_ENV is "production" and the var is absent, so this
+// branch is dead there.
+//
+// The bypass resolves to the REAL owner account (matched on OWNER_EMAIL), not a synthetic
+// "dev-local" user: local and the deployed app share one Turso database, so they must also
+// share one userId — otherwise each side would only ever see half the collection.
 export const devBypass =
   process.env.AUTH_DEV_BYPASS === "1" && process.env.NODE_ENV === "development";
 
-const DEV_USER = {
-  id: "dev-local",
-  name: "Dev Local",
-  email: OWNER_EMAIL,
-  image: null,
-};
+let devUserId: string | null = null;
 
-let devSeeded = false;
-async function ensureDevUser() {
-  if (devSeeded) return;
-  await prisma.user.upsert({
-    where: { id: DEV_USER.id },
-    update: {},
-    create: { id: DEV_USER.id, name: DEV_USER.name, email: DEV_USER.email },
+/** The owner's user id, looked up once per process (created if the account doesn't exist yet). */
+async function resolveDevUserId(): Promise<string> {
+  if (devUserId) return devUserId;
+  const existing = await prisma.user.findFirst({
+    where: { email: OWNER_EMAIL },
+    select: { id: true },
   });
-  await ensureUserStats(DEV_USER.id);
-  // In local dev, the dev user owns the legacy collection so the app is usable offline.
-  await claimLegacyData(DEV_USER.id);
-  devSeeded = true;
+  const id =
+    existing?.id ??
+    (await prisma.user.create({ data: { email: OWNER_EMAIL, name: "Owner" }, select: { id: true } }))
+      .id;
+  await ensureUserStats(id);
+  await claimLegacyData(id);
+  devUserId = id;
+  return id;
 }
 
 async function devAuth(): Promise<Session> {
-  await ensureDevUser();
+  const id = await resolveDevUserId();
   return {
-    user: DEV_USER,
+    user: { id, name: "Dev (owner)", email: OWNER_EMAIL, image: null },
     expires: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
   } as Session;
 }
@@ -96,10 +99,7 @@ export const auth: typeof nextAuth.auth = devBypass
  * require an authenticated user. Honours the dev bypass.
  */
 export async function currentUserId(): Promise<string> {
-  if (devBypass) {
-    await ensureDevUser();
-    return DEV_USER.id;
-  }
+  if (devBypass) return resolveDevUserId();
   const session = await auth();
   const id = session?.user?.id;
   if (!id) throw new Error("Not authenticated");

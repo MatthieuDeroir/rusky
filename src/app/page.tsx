@@ -34,14 +34,11 @@ export default async function HomePage() {
     );
   }
 
-  // "Continuer" targets the most useful next action.
-  const anyIncomplete = items.some((i) => i.total > 0 && i.discovered < i.total);
-  const cont =
-    due > 0
-      ? { href: "/reviser", label: `Réviser (${due})` }
-      : anyIncomplete
-        ? { href: "/parcours", label: "S’entraîner" }
-        : { href: "/add", label: "Ajouter un mot" };
+  // "Continuer" targets Réviser — it now handles both due reviews and new forms to discover.
+  const cont = {
+    href: due > 0 ? "/exercices/reviser" : "/exercices",
+    label: due > 0 ? `Réviser (${due})` : "S’entraîner",
+  };
 
   return (
     <div className="space-y-8">
@@ -55,10 +52,10 @@ export default async function HomePage() {
             Progression par nature
           </h2>
           <Link
-            href="/parcours"
+            href="/collection"
             className="inline-flex items-center gap-1 text-xs text-foreground/45 transition-colors hover:text-primary"
           >
-            Parcours <ArrowRight className="size-3.5" />
+            Collection <ArrowRight className="size-3.5" />
           </Link>
         </div>
         <HomeProgress rows={progress} />

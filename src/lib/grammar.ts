@@ -128,6 +128,30 @@ export function describeFormKey(formKey: string): string {
   return formKey;
 }
 
+/** Grammatical number a formKey belongs to, when it has one (nouns/adjectives/verbs all
+ * distinguish singular/plural forms) — null for cells with no number axis (pronoun/numeral
+ * declension is a single paradigm in this dataset, no separate plural). */
+export function numberOfFormKey(formKey: string): "sg" | "pl" | null {
+  if (formKey.startsWith("sg_")) return "sg";
+  if (formKey.startsWith("pl_")) return "pl";
+  if (formKey.startsWith("decl_pl_")) return "pl";
+  if (
+    formKey.startsWith("decl_m_") ||
+    formKey.startsWith("decl_f_") ||
+    formKey.startsWith("decl_n_")
+  )
+    return "sg";
+  if (formKey === "short_pl") return "pl";
+  if (formKey === "short_m" || formKey === "short_f" || formKey === "short_n") return "sg";
+  if (/^presfut_sg[123]$/.test(formKey)) return "sg";
+  if (/^presfut_pl[123]$/.test(formKey)) return "pl";
+  if (formKey === "past_pl") return "pl";
+  if (formKey === "past_m" || formKey === "past_f" || formKey === "past_n") return "sg";
+  if (formKey === "imperative_sg") return "sg";
+  if (formKey === "imperative_pl") return "pl";
+  return null;
+}
+
 // ---- Paradigm layouts ---------------------------------------------------------
 
 export interface ParadigmRow {

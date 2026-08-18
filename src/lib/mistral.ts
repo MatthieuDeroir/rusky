@@ -257,6 +257,153 @@ export async function gradeComprehension(
 }
 
 
+// ---- Lenient grading for Réviser (tolerate typos / close-enough answers) ---------
+
+export type ToleranceKind = "recall" | "translate";
+
+/** "exact" = à créditer pleinement ; "close" = l'idée y est mais le terme n'est pas juste
+ * (crédit partiel, la carte revient plus tôt) ; "wrong" = refusé. */
+export type ToleranceVerdict = "exact" | "close" | "wrong";
+
+export interface ToleranceCheck {
+  verdict: ToleranceVerdict;
+  reason?: string; // courte explication en français, montrée sur un "close"
+}
+
+/**
+ * Second opinion on a wrong-looking practice answer: a typo/slip for a Russian recall (or a
+ * fr→ru production), or a synonym/near-miss for a ru→fr translation. Only ever called as a
+ * FALLBACK on a deterministic miss — never on an already correct answer — and degrades to
+ * "wrong" (no behaviour change) when Mistral isn't configured or the call fails, so grading
+ * never gets stricter or blocks on this.
+ */
+export async function checkAnswerTolerance(
+  kind: ToleranceKind,
+  expected: string[],
+  answer: string,
+): Promise<ToleranceCheck> {
+  if (!mistralConfigured() || !answer.trim() || expected.length === 0) {
+    return { verdict: "wrong" };
+  }
+  const sys =
+    kind === "recall"
+      ? "Tu corriges un exercice de russe. On te donne la ou les formes russes attendues et la " +
+        "réponse tapée par l'apprenant. Réponds \"exact\" si sa réponse est UNIQUEMENT une " +
+        "faute de frappe mineure (lettre manquante, en trop, inversée, ou de clavier) d'une des " +
+        "formes attendues. Réponds \"wrong\" pour toute autre forme grammaticale (mauvais cas, " +
+        "mauvais nombre, mauvaise personne) ou un autre mot : c'est justement ce que " +
+        "l'exercice teste. N'utilise pas \"close\" ici. En cas de doute, \"wrong\". Réponds " +
+        "UNIQUEMENT en JSON."
+      : "Tu corriges un exercice de traduction russe → français. On te donne la ou les " +
+        "traductions attendues et la réponse de l'apprenant. Trois verdicts :\n" +
+        "- \"exact\" : même sens (synonyme valide, reformulation équivalente, faute " +
+        "d'orthographe ou d'accent mineure). N'invente JAMAIS d'équivalence : si tu ne peux " +
+        "pas justifier que les deux mots sont réellement synonymes en français courant, ce " +
+        "n'est pas \"exact\".\n" +
+        "- \"close\" : l'apprenant a visiblement compris l'idée mais le mot n'est pas le bon " +
+        "équivalent — nature grammaticale différente (adjectif au lieu d'une préposition), " +
+        "terme trop vague, registre ou nuance à côté. Ex. « proche » pour « près de / auprès " +
+        "de » : l'idée est là, le mot n'est pas la bonne préposition.\n" +
+        "- \"wrong\" : sens différent ou hors sujet.\n" +
+        "Réponds UNIQUEMENT en JSON.";
+  const user = [
+    `Attendu : ${expected.join(" / ")}`,
+    `Réponse de l'apprenant : ${answer}`,
+    `JSON : { "verdict": "exact" | "close" | "wrong", "reason": string très courte en français (max 12 mots), utile surtout pour "close" }`,
+  ].join("\n");
+
+  try {
+    const raw = await chatJson<{ verdict?: unknown; reason?: unknown }>(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+      0,
+    );
+    const v = String(raw.verdict ?? "").toLowerCase();
+    const verdict: ToleranceVerdict =
+      v === "exact" ? "exact" : v === "close" && kind === "translate" ? "close" : "wrong";
+    return { verdict, reason: raw.reason ? String(raw.reason) : undefined };
+  } catch {
+    return { verdict: "wrong" };
+  }
+}
+
+// ---- Repairing the French gloss against the (reliable) English one ---------------
+
+export interface FrenchGlossFix {
+  fr: string | null; // corrected/filled FR senses, comma-separated; null = leave as is
+  changed: boolean;
+}
+
+const TYPE_FR: Record<string, string> = {
+  noun: "nom",
+  verb: "verbe",
+  adjective: "adjectif",
+  pronoun: "pronom",
+  numeral: "numéral",
+  other: "invariable (adverbe, préposition, conjonction…)",
+};
+
+/**
+ * Fill or repair an entry's French gloss, using the OpenRussian English gloss as the source of
+ * truth (WikDict's FR is patchy and sometimes plain wrong — e.g. добро → « foutre » instead of
+ * « bien »). Called lazily at question time, once per entry.
+ *
+ * Degrades to "no change" whenever Mistral is unavailable or the answer is unusable, so a bad
+ * network never damages the dictionary.
+ */
+export async function repairFrenchGloss(input: {
+  accented: string;
+  type: string;
+  en: string | null;
+  fr: string | null;
+}): Promise<FrenchGlossFix> {
+  // Without an English reference there is nothing reliable to check against.
+  if (!mistralConfigured() || !input.en?.trim()) return { fr: null, changed: false };
+
+  const sys =
+    "Tu es lexicographe russe→français. On te donne un mot russe, sa NATURE grammaticale, sa " +
+    "traduction ANGLAISE (fiable, fait référence) et sa traduction FRANÇAISE actuelle (souvent " +
+    "incomplète ou erronée). Produis la traduction française correcte : 1 à 4 sens, du plus " +
+    "courant au plus rare, séparés par des virgules.\n" +
+    "Règles impératives :\n" +
+    "- La nature doit correspondre : un NOM se traduit par un nom (пилот = « pilote », jamais " +
+    "« piloter »), un VERBE par un infinitif, un ADJECTIF par un adjectif, un ADVERBE par un " +
+    "adverbe. C'est l'erreur la plus fréquente de la source à corriger.\n" +
+    "- Reste fidèle au sens anglais de référence.\n" +
+    "- Mots français usuels : pas d'argot ni de vulgarité, sauf si le mot russe est lui-même " +
+    "vulgaire (добро = « bien, biens », jamais « foutre »).\n" +
+    "- Juste les sens : pas d'article, pas de parenthèse, pas d'explication.\n" +
+    "Réponds UNIQUEMENT en JSON.";
+  const user = [
+    `Mot russe : ${input.accented}`,
+    `Nature : ${TYPE_FR[input.type] ?? input.type}`,
+    `Traduction anglaise (référence) : ${input.en}`,
+    `Traduction française actuelle : ${input.fr?.trim() || "(aucune)"}`,
+    'JSON : { "fr": "sens1, sens2, …" }',
+  ].join("\n");
+
+  try {
+    const raw = await chatJson<{ fr?: unknown }>(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+      0,
+    );
+    const fr = asText(raw.fr)
+      .replace(/\s*;\s*/g, ", ")
+      .replace(/\s*,\s*/g, ", ")
+      .trim();
+    // Guard against a degenerate answer that would wreck a usable existing gloss.
+    if (!fr || fr.length > 200) return { fr: null, changed: false };
+    return { fr, changed: fr !== (input.fr ?? "").trim() };
+  } catch {
+    return { fr: null, changed: false };
+  }
+}
+
 // ---- Readiness recommendation (computed when opening the Validation tab) ----------
 
 export interface LearnerProfile {

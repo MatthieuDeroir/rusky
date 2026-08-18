@@ -7,6 +7,7 @@ import {
   type WordType,
 } from "./grammar";
 import { caseTriggers } from "./cases";
+import { MAX_LEVEL } from "./srs";
 import {
   adjClass,
   analyzeAdjective,
@@ -186,6 +187,43 @@ export async function getThemes(userId: string): Promise<ExerciseTheme[]> {
   );
 }
 
+function typeOfThemeKey(key: string): WordType {
+  if (key.startsWith("noun-")) return "noun";
+  if (key.startsWith("verb-")) return "verb";
+  if (key.startsWith("adj-")) return "adjective";
+  if (key === "pronoun") return "pronoun";
+  if (key === "numeral") return "numeral";
+  return "other";
+}
+
+export interface ThemeOption {
+  key: string; // a fine theme key (see getThemes), or a coarse word-type key ("noun" | "verb" | "adjective")
+  label: string;
+}
+
+/** Theme filter options for Réviser: the same buckets as getThemes, but with an extra "all
+ * <type>" option ahead of any type split into several sub-themes — e.g. "Verbes" ahead of
+ * "Verbes — 1re conjugaison" / "2e conjugaison" / "irréguliers" — so a broad filter is always
+ * available, not just the grammatical subclasses. */
+export async function getThemeOptions(userId: string): Promise<ThemeOption[]> {
+  const fine = await getThemes(userId);
+  const byType = new Map<WordType, ExerciseTheme[]>();
+  for (const t of fine) {
+    const type = typeOfThemeKey(t.key);
+    const arr = byType.get(type) ?? [];
+    arr.push(t);
+    byType.set(type, arr);
+  }
+
+  const options: ThemeOption[] = [];
+  for (const group of byType.values()) {
+    const type = typeOfThemeKey(group[0].key);
+    if (group.length > 1) options.push({ key: type, label: TYPE_PLURAL[type] });
+    for (const t of group) options.push({ key: t.key, label: t.label });
+  }
+  return options;
+}
+
 /** Previous/next word ids. Within a theme, navigation targets the words still TO COMPLETE
  * (alphabetical, wrapping around) so finishing one jumps to the next to fill — never to an
  * already-completed word. Without a theme, it's plain sequential over the collection. */
@@ -235,6 +273,9 @@ export interface CollectionItem {
   discovered: number;
   total: number;
   firstSeen: number; // epoch ms of the earliest encounter (date added)
+  level: number; // mastery 0..MAX_LEVEL, averaged over the word's SRS cards
+  cards: number; // how many SRS cards back that average (0 = never practised)
+  dueSoon: boolean; // at least one of its cards is due now
 }
 
 /** All words the user has encountered, with discovery progress. */
@@ -271,19 +312,41 @@ export async function getCollection(userId: string): Promise<CollectionItem[]> {
     totalByEntry.set(r.entryId, (totalByEntry.get(r.entryId) ?? 0) + 1);
   }
 
+  // Mastery: average level across the word's SRS cards (forms + vocab), so a word only counts
+  // as mastered once its whole paradigm holds up, not just one lucky cell.
+  const reviews = await prisma.formReview.findMany({
+    where: { userId, entryId: { in: entryIds } },
+    select: { entryId: true, repetitions: true, dueAt: true },
+  });
+  const now = new Date();
+  const srsByEntry = new Map<number, { sum: number; n: number; due: boolean }>();
+  for (const r of reviews) {
+    const g = srsByEntry.get(r.entryId) ?? { sum: 0, n: 0, due: false };
+    g.sum += Math.min(MAX_LEVEL, r.repetitions);
+    g.n += 1;
+    if (r.dueAt <= now) g.due = true;
+    srsByEntry.set(r.entryId, g);
+  }
+
   return entries
-    .map((e) => ({
-      id: e.id,
-      bare: e.bare,
-      accented: e.accented,
-      type: e.type as WordType,
-      translationsFr: e.translationsFr,
-      gender: e.gender,
-      aspect: e.aspect,
-      discovered: discoveredByEntry.get(e.id)?.size ?? 0,
-      total: totalByEntry.get(e.id) ?? 0,
-      firstSeen: firstSeenByEntry.get(e.id) ?? 0,
-    }))
+    .map((e) => {
+      const srs = srsByEntry.get(e.id);
+      return {
+        id: e.id,
+        bare: e.bare,
+        accented: e.accented,
+        type: e.type as WordType,
+        translationsFr: e.translationsFr,
+        gender: e.gender,
+        aspect: e.aspect,
+        discovered: discoveredByEntry.get(e.id)?.size ?? 0,
+        total: totalByEntry.get(e.id) ?? 0,
+        firstSeen: firstSeenByEntry.get(e.id) ?? 0,
+        level: srs && srs.n > 0 ? Math.floor(srs.sum / srs.n) : 0,
+        cards: srs?.n ?? 0,
+        dueSoon: srs?.due ?? false,
+      };
+    })
     .sort((a, b) => a.bare.localeCompare(b.bare, "ru"));
 }
 
@@ -608,10 +671,11 @@ export async function getTypeProgress(userId: string): Promise<TypeProgress[]> {
   });
 }
 
-/** Number of spaced-repetition forms currently due for this user (SRS "Réviser" queue). */
+/** Number of spaced-repetition forms currently due for this user (SRS "Réviser" queue).
+ * Excludes "vocab:" rows, which belong to the standalone Traduire exercise. */
 export async function dueReviewCount(userId: string): Promise<number> {
   return prisma.formReview.count({
-    where: { userId, dueAt: { lte: new Date() } },
+    where: { userId, dueAt: { lte: new Date() }, NOT: { formKey: { startsWith: "vocab:" } } },
   });
 }
 

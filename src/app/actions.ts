@@ -4,18 +4,17 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
 import { addXp, setDailyGoal, type XpAward } from "@/lib/xp";
-import { review as srsReview, nextDueDate, INITIAL_STATE } from "@/lib/srs";
+import {
+  review as srsReview,
+  nextDueDate,
+  INITIAL_STATE,
+  levelOf,
+  levelLabel,
+  MAX_LEVEL,
+} from "@/lib/srs";
 import { backupDatabase } from "@/lib/backup";
 import { detectWord, type DetectionMatch } from "@/lib/detect";
 import { hintForForm, reviewItems, themeOf } from "@/lib/queries";
-import {
-  caseTriggers,
-  explainTrigger,
-  triggerCase,
-  CASE_ORDER,
-  type CaseTrigger,
-  type TriggerKind,
-} from "@/lib/cases";
 import {
   analyzeTokens,
   PREPOSITION_CASES,
@@ -32,16 +31,20 @@ import {
   type WordType,
 } from "@/lib/grammar";
 import {
-  TRACK_FAMILIES,
-  milestonesFor,
-  testSizeForLevel,
-  neededCorrect,
-  type Track,
-  type LevelTrack,
-} from "@/lib/levels";
-import { getValidatedLevels, recordValidatedLevel } from "@/lib/level-store";
+  allScopes,
+  findScope,
+  entryInScope,
+  formKeyInScope,
+} from "@/lib/learn";
 import { findTask, PASS_SCORE, type GradeResult, type ExamItem } from "@/lib/torfl";
-import { gradeProduction, generateExamItem, gradeComprehension } from "@/lib/mistral";
+import {
+  gradeProduction,
+  generateExamItem,
+  gradeComprehension,
+  checkAnswerTolerance,
+  repairFrenchGloss,
+  type ToleranceKind,
+} from "@/lib/mistral";
 import { recordPassedTask } from "@/lib/torfl-store";
 import { saveMcqKey, getMcqKey } from "@/lib/exam-items-store";
 
@@ -185,383 +188,8 @@ export async function deleteWordAction(entryId: number): Promise<{ deleted: numb
   return { deleted: encounters.count };
 }
 
-export interface QuizQuestion {
-  entryId: number;
-  accented: string;
-  bare: string;
-  type: WordType;
-  typeLabel: string;
-  translationsFr: string | null;
-  formKey: string;
-  formLabel: string;
-  hint: string[]; // grammar rule lines for this form's section
-}
-
-/** "discovered" = review forms already seen ; "undiscovered" = forms still to fill in. */
-export type QuizMode = "discovered" | "undiscovered";
-
-/** Pick a practice question: a collected, inflecting word and one of its cells.
- * `exclude` ("entryId|formKey") is avoided unless it's the only option (no immediate repeats). */
-export async function getQuizQuestionAction(
-  mode: QuizMode = "undiscovered",
-  exclude?: string,
-  theme?: string,
-): Promise<QuizQuestion | null> {
-  const userId = await currentUserId();
-  const encounters = await prisma.encounter.findMany({
-    where: { entryId: { not: null }, userId },
-    select: { entryId: true, matchedFormKey: true },
-  });
-  if (encounters.length === 0) return null;
-
-  const entryIds = [...new Set(encounters.map((e) => e.entryId!))];
-  const discoveredByEntry = new Map<number, Set<string>>();
-  for (const e of encounters) {
-    if (!e.matchedFormKey) continue;
-    const s = discoveredByEntry.get(e.entryId!) ?? new Set();
-    s.add(e.matchedFormKey);
-    discoveredByEntry.set(e.entryId!, s);
-  }
-
-  const allEntries = await prisma.dictionaryEntry.findMany({
-    where: { id: { in: entryIds }, type: { not: "other" } },
-  });
-  if (allEntries.length === 0) return null;
-
-  // Full forms for the collected entries — used for keys, the theme filter and the hint.
-  const formVariants = await prisma.dictionaryForm.findMany({
-    where: { entryId: { in: allEntries.map((e) => e.id) } },
-    orderBy: { variantIndex: "asc" },
-    select: { entryId: true, formKey: true, accented: true },
-  });
-  const formsByEntry = new Map<number, Map<string, string[]>>();
-  for (const f of formVariants) {
-    const m = formsByEntry.get(f.entryId) ?? new Map<string, string[]>();
-    const arr = m.get(f.formKey) ?? [];
-    arr.push(f.accented);
-    m.set(f.formKey, arr);
-    formsByEntry.set(f.entryId, m);
-  }
-
-  const entries = theme
-    ? allEntries.filter((e) => themeOf(e, formsByEntry.get(e.id) ?? new Map()).key === theme)
-    : allEntries;
-  if (entries.length === 0) return null;
-
-  // Pool of (entry, formKey) for the requested mode: discovered cells (review) or
-  // undiscovered cells (still to fill in).
-  const pool: { entry: (typeof entries)[number]; formKey: string }[] = [];
-  for (const entry of entries) {
-    const keys = [...(formsByEntry.get(entry.id)?.keys() ?? [])];
-    const done = discoveredByEntry.get(entry.id) ?? new Set();
-    for (const formKey of keys) {
-      const isDone = done.has(formKey);
-      if (mode === "discovered" ? isDone : !isDone) pool.push({ entry, formKey });
-    }
-  }
-  if (pool.length === 0) return null;
-  const choices =
-    exclude && pool.length > 1
-      ? pool.filter((p) => `${p.entry.id}|${p.formKey}` !== exclude)
-      : pool;
-  const pick = choices[Math.floor(Math.random() * choices.length)];
-  const forms = formsByEntry.get(pick.entry.id) ?? new Map<string, string[]>();
-
-  return {
-    entryId: pick.entry.id,
-    accented: pick.entry.accented,
-    bare: pick.entry.bare,
-    type: pick.entry.type as WordType,
-    typeLabel: WORD_TYPE_LABELS[pick.entry.type as WordType],
-    translationsFr: pick.entry.translationsFr,
-    formKey: pick.formKey,
-    formLabel: describeFormKey(pick.formKey),
-    hint: hintForForm(pick.entry, forms, pick.formKey),
-  };
-}
-
-export interface QuizResult {
-  correct: boolean;
-  expected: string[]; // accepted accented forms
-  xp?: XpAward;
-}
-
-export async function submitQuizAction(input: {
-  entryId: number;
-  formKey: string;
-  answer: string;
-}): Promise<QuizResult> {
-  const forms = await prisma.dictionaryForm.findMany({
-    where: { entryId: input.entryId, formKey: input.formKey },
-  });
-  const expected = forms.map((f) => f.accented);
-  const accepted = new Set(forms.map((f) => f.bareForm));
-  const correct = accepted.has(normalizeBare(input.answer));
-
-  const userId = await currentUserId();
-  await prisma.quizAttempt.create({
-    data: {
-      entryId: input.entryId,
-      formKey: input.formKey,
-      userAnswer: input.answer,
-      correct,
-      userId,
-    },
-  });
-
-  const xp = correct ? await addXp(userId, "quiz") : undefined;
-  return { correct, expected, xp };
-}
-
-// ---- Translation mode (Traduire) -------------------------------------------------
-
-export type TranslateDirection = "ru-fr" | "fr-ru";
-
-export interface TranslateQuestion {
-  entryId: number;
-  formKey: string | null; // the discovered form (null = dictionary form)
-  promptRu: string; // accented Russian form to show (ru-fr) / to produce (fr-ru)
-  formLabel: string; // e.g. "prépositionnel pluriel" or "forme du dictionnaire"
-  type: WordType;
-  typeLabel: string;
-  translationsFr: string;
-  direction: TranslateDirection;
-}
-
-/** Pick a DISCOVERED form (entry + matchedFormKey) that has a French translation. */
-export async function getTranslateQuestionAction(
-  direction: TranslateDirection,
-  type: WordType | "all" = "all",
-  exclude?: string,
-  theme?: string,
-): Promise<TranslateQuestion | null> {
-  const userId = await currentUserId();
-  const enc = await prisma.encounter.findMany({
-    where: { entryId: { not: null }, userId },
-    select: { entryId: true, matchedFormKey: true },
-  });
-  if (enc.length === 0) return null;
-
-  const entries = await prisma.dictionaryEntry.findMany({
-    where: {
-      id: { in: [...new Set(enc.map((e) => e.entryId!))] },
-      translationsFr: { not: null },
-      ...(type === "all" ? {} : { type }),
-    },
-  });
-  let entryMap = new Map(entries.map((e) => [e.id, e]));
-
-  // Restrict to a grammatical theme if requested (needs the forms to classify).
-  if (theme) {
-    const fv = await prisma.dictionaryForm.findMany({
-      where: { entryId: { in: entries.map((e) => e.id) } },
-      orderBy: { variantIndex: "asc" },
-      select: { entryId: true, formKey: true, accented: true },
-    });
-    const fbe = new Map<number, Map<string, string[]>>();
-    for (const f of fv) {
-      const m = fbe.get(f.entryId) ?? new Map<string, string[]>();
-      const arr = m.get(f.formKey) ?? [];
-      arr.push(f.accented);
-      m.set(f.formKey, arr);
-      fbe.set(f.entryId, m);
-    }
-    entryMap = new Map(
-      entries
-        .filter((e) => themeOf(e, fbe.get(e.id) ?? new Map()).key === theme)
-        .map((e) => [e.id, e]),
-    );
-  }
-
-  // Distinct discovered (entry, form) pairs whose entry has a French translation.
-  const seen = new Set<string>();
-  const pairs: { entryId: number; formKey: string | null }[] = [];
-  for (const e of enc) {
-    if (!entryMap.has(e.entryId!)) continue;
-    const key = `${e.entryId}|${e.matchedFormKey ?? ""}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    pairs.push({ entryId: e.entryId!, formKey: e.matchedFormKey });
-  }
-  if (pairs.length === 0) return null;
-
-  const choices =
-    exclude && pairs.length > 1
-      ? pairs.filter((p) => `${p.entryId}|${p.formKey ?? ""}` !== exclude)
-      : pairs;
-  const pick = choices[Math.floor(Math.random() * choices.length)];
-  const e = entryMap.get(pick.entryId)!;
-
-  let promptRu = e.accented;
-  let formLabel = "forme du dictionnaire";
-  if (pick.formKey) {
-    const f = await prisma.dictionaryForm.findFirst({
-      where: { entryId: pick.entryId, formKey: pick.formKey },
-    });
-    if (f) {
-      promptRu = f.accented;
-      formLabel = describeFormKey(pick.formKey);
-    }
-  }
-
-  return {
-    entryId: e.id,
-    formKey: pick.formKey,
-    promptRu,
-    formLabel,
-    type: e.type as WordType,
-    typeLabel: WORD_TYPE_LABELS[e.type as WordType],
-    translationsFr: e.translationsFr!,
-    direction,
-  };
-}
-
-export interface TranslateResult {
-  correct: boolean;
-  expected: string[];
-  xp?: XpAward;
-}
-
-export async function submitTranslateAction(input: {
-  entryId: number;
-  formKey: string | null;
-  direction: TranslateDirection;
-  answer: string;
-}): Promise<TranslateResult> {
-  const e = await prisma.dictionaryEntry.findUnique({ where: { id: input.entryId } });
-  if (!e) return { correct: false, expected: [] };
-
-  let correct = false;
-  let expected: string[] = [];
-  if (input.direction === "fr-ru") {
-    // Answer is Russian: expect the specific discovered form (or the lemma if base).
-    if (input.formKey) {
-      const forms = await prisma.dictionaryForm.findMany({
-        where: { entryId: input.entryId, formKey: input.formKey },
-      });
-      expected = forms.map((f) => f.accented);
-      const accepted = new Set(forms.map((f) => f.bareForm));
-      correct = accepted.has(normalizeBare(input.answer));
-    } else {
-      expected = [e.accented];
-      correct = normalizeBare(input.answer) === e.bare;
-    }
-  } else {
-    // Answer is French: accept any of the comma-separated senses.
-    const raw = e.translationsFr ?? "";
-    expected = raw.split(",").map((s) => s.trim()).filter(Boolean);
-    const senses = expected.map(normalizeFr);
-    correct = senses.includes(normalizeFr(input.answer));
-  }
-
-  const userId = await currentUserId();
-  await prisma.quizAttempt.create({
-    data: {
-      entryId: input.entryId,
-      // Encode the direction AND the specific form so catch-up can target the exact item.
-      formKey: `translate:${input.direction}:${input.formKey ?? "base"}`,
-      userAnswer: input.answer,
-      correct,
-      userId,
-    },
-  });
-  const xp = correct ? await addXp(userId, "translate") : undefined;
-  return { correct, expected, xp };
-}
-
-// ---- Rattrapage (catch-up on items last answered wrong) ---------------------------
-
-/** A form-quiz question drawn from the items whose latest attempt was incorrect. */
-export async function getReviewQuizQuestionAction(
-  exclude?: string,
-): Promise<QuizQuestion | null> {
-  const userId = await currentUserId();
-  const pool = (await reviewItems(userId))
-    .filter((it) => it.kind === "forme")
-    .map((it) => ({ entryId: it.entryId, formKey: it.attemptKey }));
-  if (pool.length === 0) return null;
-
-  const choices =
-    exclude && pool.length > 1
-      ? pool.filter((p) => `${p.entryId}|${p.formKey}` !== exclude)
-      : pool;
-  const pick = choices[Math.floor(Math.random() * choices.length)];
-
-  const entry = await prisma.dictionaryEntry.findUnique({ where: { id: pick.entryId } });
-  if (!entry) return null;
-
-  const formVariants = await prisma.dictionaryForm.findMany({
-    where: { entryId: pick.entryId },
-    orderBy: { variantIndex: "asc" },
-    select: { formKey: true, accented: true },
-  });
-  const forms = new Map<string, string[]>();
-  for (const f of formVariants) {
-    const arr = forms.get(f.formKey) ?? [];
-    arr.push(f.accented);
-    forms.set(f.formKey, arr);
-  }
-
-  return {
-    entryId: entry.id,
-    accented: entry.accented,
-    bare: entry.bare,
-    type: entry.type as WordType,
-    typeLabel: WORD_TYPE_LABELS[entry.type as WordType],
-    translationsFr: entry.translationsFr,
-    formKey: pick.formKey,
-    formLabel: describeFormKey(pick.formKey),
-    hint: hintForForm(entry, forms, pick.formKey),
-  };
-}
-
-/** A translation question (one direction) drawn from the items last answered wrong. */
-export async function getReviewTranslateQuestionAction(
-  direction: TranslateDirection,
-  exclude?: string,
-): Promise<TranslateQuestion | null> {
-  const userId = await currentUserId();
-  const pool = (await reviewItems(userId))
-    .filter((it) => it.kind === direction)
-    .map((it) => {
-      const parts = it.attemptKey.split(":"); // translate : dir : form
-      const realKey = parts.length >= 3 && parts[2] !== "base" ? parts[2] : null;
-      return { entryId: it.entryId, realKey, cardKey: `${it.entryId}|${realKey ?? ""}` };
-    });
-  if (pool.length === 0) return null;
-
-  const choices =
-    exclude && pool.length > 1 ? pool.filter((p) => p.cardKey !== exclude) : pool;
-  const pick = choices[Math.floor(Math.random() * choices.length)];
-
-  const e = await prisma.dictionaryEntry.findUnique({ where: { id: pick.entryId } });
-  if (!e || !e.translationsFr) return null;
-
-  let promptRu = e.accented;
-  let formLabel = "forme du dictionnaire";
-  if (pick.realKey) {
-    const f = await prisma.dictionaryForm.findFirst({
-      where: { entryId: pick.entryId, formKey: pick.realKey },
-    });
-    if (f) {
-      promptRu = f.accented;
-      formLabel = describeFormKey(pick.realKey);
-    }
-  }
-
-  return {
-    entryId: e.id,
-    formKey: pick.realKey,
-    promptRu,
-    formLabel,
-    type: e.type as WordType,
-    typeLabel: WORD_TYPE_LABELS[e.type as WordType],
-    translationsFr: e.translationsFr,
-    direction,
-  };
-}
-
 // ---- Parler (pronunciation: speak the word, compared via speech-to-text) ----------
+// Mis de côté (retiré de la nav / de la boucle Réviser) mais gardé tel quel pour réexamen futur.
 
 export interface SpeakQuestion {
   entryId: number;
@@ -661,6 +289,20 @@ function editDistance(a: string, b: string): number {
   return prev[n];
 }
 
+/** True when `answer` is close enough to one of `expected` (normalized) to be worth a second
+ * opinion from the AI — i.e. plausibly a typo, not a wildly different / unrelated answer. Keeps
+ * the tolerance check from firing (and costing a round-trip) on clearly-wrong guesses. */
+function plausibleTypo(expected: string[], answer: string): boolean {
+  const a = normalizeBare(answer);
+  if (!a) return false;
+  return expected.some((e) => {
+    const b = normalizeBare(e);
+    if (!b) return false;
+    const dist = editDistance(a, b);
+    return dist > 0 && dist <= Math.max(1, Math.ceil(Math.max(a.length, b.length) * 0.3));
+  });
+}
+
 /** Compare the speech-to-text hypotheses against the requested word (accent-insensitive). */
 export async function submitSpeakAction(input: {
   entryId: number;
@@ -733,149 +375,8 @@ export async function submitSpeakAction(input: {
   return { correct, expected, heard, xp };
 }
 
-// ---- Cas (which case does this trigger govern?) -----------------------------------
-
-export interface CaseExample {
-  cas: CaseCode;
-  form: string; // the collected word declined in that case (accented)
-}
-export interface CaseQuestion {
-  trigger: string; // the preposition or verb
-  triggerKind: TriggerKind;
-  word: string | null; // an illustrative collected noun/pronoun (nominative, accented)
-  examples: CaseExample[]; // that word in each governed case, for the reveal
-  correctCases: CaseCode[]; // any of these is a correct answer
-  options: CaseCode[]; // the case buttons to choose from
-  explanation: string;
-  entryId: number | null; // the collected word used (for recording), null if none
-  key: string; // identifier for exclude / review (the trigger)
-}
-
-/** Pick a collected noun/pronoun with all its forms (to build per-case examples). */
-async function pickCollectedNoun(userId: string): Promise<{
-  entryId: number;
-  word: string;
-  forms: { formKey: string; accented: string }[];
-} | null> {
-  const enc = await prisma.encounter.findMany({
-    where: { entryId: { not: null }, userId },
-    select: { entryId: true },
-  });
-  const ids = [...new Set(enc.map((e) => e.entryId!))];
-  if (ids.length === 0) return null;
-  const nouns = await prisma.dictionaryEntry.findMany({
-    where: { id: { in: ids }, type: { in: ["noun", "pronoun"] } },
-  });
-  if (nouns.length === 0) return null;
-  const e = nouns[Math.floor(Math.random() * nouns.length)];
-  const forms = await prisma.dictionaryForm.findMany({
-    where: { entryId: e.id },
-    orderBy: { variantIndex: "asc" },
-    select: { formKey: true, accented: true },
-  });
-  return { entryId: e.id, word: e.accented, forms };
-}
-
-/**
- * A "which case?" question: a single-case trigger (preposition or rection verb) plus a word
- * from the collection. In review mode, draws from triggers last answered wrong.
- */
-export async function getCaseQuestionAction(
-  caseFilter: CaseCode | null,
-  exclude?: string,
-  review = false,
-): Promise<CaseQuestion | null> {
-  const userId = await currentUserId();
-  let pool: CaseTrigger[];
-  if (review) {
-    const triggers = (await reviewItems(userId))
-      .filter((it) => it.kind === "case")
-      .map((it) => it.attemptKey.slice("case:".length));
-    pool = triggers
-      .map((t) => triggerCase(t))
-      .filter((t): t is CaseTrigger => t !== null);
-  } else {
-    // Only triggers whose word is in the user's collection.
-    const enc = await prisma.encounter.findMany({
-      where: { entryId: { not: null }, userId },
-      select: { entryId: true },
-    });
-    const ids = [...new Set(enc.map((e) => e.entryId!))];
-    const collectedEntries = ids.length
-      ? await prisma.dictionaryEntry.findMany({
-          where: { id: { in: ids } },
-          select: { bare: true },
-        })
-      : [];
-    const collected = new Set(collectedEntries.map((e) => e.bare));
-    pool = caseTriggers().filter((t) => collected.has(t.trigger));
-    if (caseFilter) pool = pool.filter((t) => t.cases.includes(caseFilter));
-  }
-  if (pool.length === 0) return null;
-
-  const choices = exclude && pool.length > 1 ? pool.filter((t) => t.trigger !== exclude) : pool;
-  const t = choices[Math.floor(Math.random() * choices.length)];
-
-  const noun = await pickCollectedNoun(userId);
-  const examples: CaseExample[] = [];
-  if (noun) {
-    for (const c of t.cases) {
-      const inCase = noun.forms.filter((f) => caseOf(f.formKey) === c);
-      const sg = inCase.find((f) => f.formKey.includes("sg")) ?? inCase[0];
-      if (sg) examples.push({ cas: c, form: sg.accented });
-    }
-  }
-
-  return {
-    trigger: t.trigger,
-    triggerKind: t.kind,
-    word: noun?.word ?? null,
-    examples,
-    correctCases: t.cases,
-    options: CASE_ORDER,
-    explanation: explainTrigger(t),
-    entryId: noun?.entryId ?? null,
-    key: t.trigger,
-  };
-}
-
-export interface CaseResult {
-  correct: boolean;
-  correctCases: CaseCode[];
-  explanation: string;
-  xp?: XpAward;
-}
-
-export async function submitCaseAction(input: {
-  entryId: number | null;
-  trigger: string;
-  chosen: CaseCode;
-}): Promise<CaseResult> {
-  const t = triggerCase(input.trigger);
-  const correct = t !== null && t.cases.includes(input.chosen);
-  let xp: XpAward | undefined;
-  if (input.entryId != null) {
-    const userId = await currentUserId();
-    await prisma.quizAttempt.create({
-      data: {
-        entryId: input.entryId,
-        formKey: `case:${input.trigger}`,
-        userAnswer: input.chosen,
-        correct,
-        userId,
-      },
-    });
-    if (correct) xp = await addXp(userId, "case");
-  }
-  return {
-    correct,
-    correctCases: t?.cases ?? [input.chosen],
-    explanation: t ? explainTrigger(t) : "",
-    xp,
-  };
-}
-
 // ---- Sentence construction check (Phrase) ----------------------------------------
+// Mis de côté (retiré de la nav / de la boucle Réviser) mais gardé tel quel pour réexamen futur.
 
 export interface SentenceTok {
   raw: string;
@@ -987,157 +488,98 @@ export async function checkSentenceAction(sentence: string): Promise<SentenceChe
   return { tokens, issues, xp };
 }
 
-// ---- Réviser (SRS spaced repetition) ---------------------------------------------
+// ---- Réviser : moteur d'entraînement unifié (SRS spaced repetition) --------------
+//
+// Une seule file, alimentée par FormReview (SM-2) :
+//   1. cartes dues (déjà découvertes, à retenir) — recall OU traduction ru→fr
+//   2. sinon, une cellule de paradigme pas encore découverte d'un mot déjà collecté
+// Une réponse fausse remet la carte à intervalDays=0 (SM-2 "again"), donc elle revient
+// immédiatement dans la file : pas besoin d'une page de rattrapage séparée.
 
-/** Seed the SRS queue from the user's discovered forms the first time they open Réviser. */
-async function ensureReviewSeed(userId: string): Promise<void> {
-  const count = await prisma.formReview.count({ where: { userId } });
-  if (count > 0) return;
-  const enc = await prisma.encounter.findMany({
-    where: { userId, entryId: { not: null }, matchedFormKey: { not: null } },
-    select: { entryId: true, matchedFormKey: true },
-  });
-  const seen = new Set<string>();
-  const now = new Date();
-  const data: { userId: string; entryId: number; formKey: string; dueAt: Date }[] = [];
-  for (const e of enc) {
-    const key = `${e.entryId}|${e.matchedFormKey}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    data.push({ userId, entryId: e.entryId!, formKey: e.matchedFormKey!, dueAt: now });
-  }
-  if (data.length > 0) await prisma.formReview.createMany({ data });
-}
+export type PracticeKind = "recall" | "translate-ru-fr" | "translate-fr-ru";
 
-/** A due SRS card (same shape as a quiz question) or "empty" when nothing is due. */
-export async function getReviewCardAction(exclude?: string): Promise<QuizQuestion | "empty"> {
-  const userId = await currentUserId();
-  await ensureReviewSeed(userId);
-
-  const due = await prisma.formReview.findMany({
-    where: { userId, dueAt: { lte: new Date() } },
-    take: 60,
-    select: { entryId: true, formKey: true },
-  });
-  if (due.length === 0) return "empty";
-
-  const choices =
-    exclude && due.length > 1
-      ? due.filter((d) => `${d.entryId}|${d.formKey}` !== exclude)
-      : due;
-  const pick = choices[Math.floor(Math.random() * choices.length)];
-
-  const entry = await prisma.dictionaryEntry.findUnique({ where: { id: pick.entryId } });
-  if (!entry) return "empty";
-  const formVariants = await prisma.dictionaryForm.findMany({
-    where: { entryId: pick.entryId },
-    orderBy: { variantIndex: "asc" },
-    select: { formKey: true, accented: true },
-  });
-  const forms = new Map<string, string[]>();
-  for (const f of formVariants) {
-    const arr = forms.get(f.formKey) ?? [];
-    arr.push(f.accented);
-    forms.set(f.formKey, arr);
-  }
-  return {
-    entryId: entry.id,
-    accented: entry.accented,
-    bare: entry.bare,
-    type: entry.type as WordType,
-    typeLabel: WORD_TYPE_LABELS[entry.type as WordType],
-    translationsFr: entry.translationsFr,
-    formKey: pick.formKey,
-    formLabel: describeFormKey(pick.formKey),
-    hint: hintForForm(entry, forms, pick.formKey),
-  };
-}
-
-export interface ReviewResult extends QuizResult {
-  dueInDays: number; // when this form comes back
-}
-
-/** Grade an SRS card and reschedule it (SM-2). Correct → "good", wrong → "again". */
-export async function submitReviewAction(input: {
+export interface PracticeCard {
+  kind: PracticeKind;
   entryId: number;
-  formKey: string;
-  answer: string;
-}): Promise<ReviewResult> {
-  const userId = await currentUserId();
-  const forms = await prisma.dictionaryForm.findMany({
-    where: { entryId: input.entryId, formKey: input.formKey },
-  });
-  const expected = forms.map((f) => f.accented);
-  const accepted = new Set(forms.map((f) => f.bareForm));
-  const correct = accepted.has(normalizeBare(input.answer));
-
-  const existing = await prisma.formReview.findUnique({
-    where: { userId_entryId_formKey: { userId, entryId: input.entryId, formKey: input.formKey } },
-  });
-  const state = existing
-    ? {
-        ease: existing.ease,
-        intervalDays: existing.intervalDays,
-        repetitions: existing.repetitions,
-        lapses: existing.lapses,
-      }
-    : INITIAL_STATE;
-  const next = srsReview(state, correct ? "good" : "again");
-  const now = new Date();
-  const dueAt = nextDueDate(next, now);
-  await prisma.formReview.upsert({
-    where: { userId_entryId_formKey: { userId, entryId: input.entryId, formKey: input.formKey } },
-    update: { ...next, dueAt, lastReviewedAt: now },
-    create: { userId, entryId: input.entryId, formKey: input.formKey, ...next, dueAt, lastReviewedAt: now },
-  });
-
-  // Keep the catch-up view consistent with a normal practice attempt.
-  await prisma.quizAttempt.create({
-    data: { entryId: input.entryId, formKey: input.formKey, userAnswer: input.answer, correct, userId },
-  });
-
-  const xp = correct ? await addXp(userId, "review") : undefined;
-  return { correct, expected, xp, dueInDays: next.intervalDays };
-}
-
-// ---- Level control tests (valider un palier de complétion) -----------------------
-
-export interface LevelTestQuestion {
-  entryId: number;
-  accented: string;
+  formKey: string | null; // real DictionaryForm.formKey used for grading (null = lemma)
+  reviewKey: string; // FormReview.formKey — formKey for recall, "translate:<dir>:<formKey|base>" else
+  accented: string; // the entry's dictionary (lemma) form
+  promptRu: string; // Russian form actually shown (recall form, or the ru→fr prompt)
   bare: string;
   type: WordType;
   typeLabel: string;
   translationsFr: string | null;
-  formKey: string;
   formLabel: string;
   hint: string[];
+  isNew: boolean; // true = undiscovered cell; a correct answer creates an Encounter
 }
 
-export interface LevelTestInfo {
-  track: Track;
-  targetLevel: number; // milestone index being attempted
-  size: number; // number of questions
-  needed: number; // correct answers required to pass
-  available: number; // how many discovered forms of this family exist
-  insufficient: boolean; // too few discovered forms to run a full control
-  questions: LevelTestQuestion[];
+const TRANSLATE_PREFIX_RU_FR = "translate:ru-fr:";
+const TRANSLATE_PREFIX_FR_RU = "translate:fr-ru:";
+
+function parseReviewKey(reviewKey: string): { kind: PracticeKind; realFormKey: string | null } {
+  if (reviewKey.startsWith(TRANSLATE_PREFIX_RU_FR)) {
+    const rest = reviewKey.slice(TRANSLATE_PREFIX_RU_FR.length);
+    return { kind: "translate-ru-fr", realFormKey: rest === "base" ? null : rest };
+  }
+  if (reviewKey.startsWith(TRANSLATE_PREFIX_FR_RU)) {
+    const rest = reviewKey.slice(TRANSLATE_PREFIX_FR_RU.length);
+    return { kind: "translate-fr-ru", realFormKey: rest === "base" ? null : rest };
+  }
+  return { kind: "recall", realFormKey: reviewKey };
 }
 
-/** Build a control test for the NEXT unvalidated level of a track. Questions are drawn from
- * the forms the user has actually discovered (filled) in that family. */
-export async function getLevelTestAction(track: Track): Promise<LevelTestInfo> {
-  const userId = await currentUserId();
-  const families = new Set(TRACK_FAMILIES[track]);
-  const milestones = milestonesFor(track);
-  const validated = (await getValidatedLevels(userId))[track];
-  const targetLevel = Math.min(validated + 1, milestones.length - 1);
-  const size = testSizeForLevel(targetLevel);
-  const needed = neededCorrect(size);
+/**
+ * Keep FormReview in sync with the user's discovered forms: seed a "recall" card for every
+ * (entry, formKey) discovered via an Encounter, plus one "translate ru→fr" card per distinct
+ * collected entry that has a French translation. Idempotent — only inserts what's missing, so
+ * it's safe (and needed) to call on every practice load, not just once.
+ */
+async function ensureReviewSeed(userId: string): Promise<void> {
+  const [existing, enc] = await Promise.all([
+    prisma.formReview.findMany({ where: { userId }, select: { entryId: true, formKey: true } }),
+    prisma.encounter.findMany({
+      where: { userId, entryId: { not: null }, matchedFormKey: { not: null } },
+      select: { entryId: true, matchedFormKey: true },
+    }),
+  ]);
+  const have = new Set(existing.map((r) => `${r.entryId}|${r.formKey}`));
+  const seen = new Set<string>();
+  const now = new Date();
+  const data: { userId: string; entryId: number; formKey: string; dueAt: Date }[] = [];
 
+  for (const e of enc) {
+    const key = `${e.entryId}|${e.matchedFormKey}`;
+    if (seen.has(key) || have.has(key)) continue;
+    seen.add(key);
+    data.push({ userId, entryId: e.entryId!, formKey: e.matchedFormKey!, dueAt: now });
+  }
+
+  const entryIds = [...new Set(enc.map((e) => e.entryId!))];
+  if (entryIds.length > 0) {
+    const translatable = await prisma.dictionaryEntry.findMany({
+      where: { id: { in: entryIds }, translationsFr: { not: null } },
+      select: { id: true },
+    });
+    for (const e of translatable) {
+      const formKey = `${TRANSLATE_PREFIX_RU_FR}base`;
+      const key = `${e.id}|${formKey}`;
+      if (seen.has(key) || have.has(key)) continue;
+      seen.add(key);
+      data.push({ userId, entryId: e.id, formKey, dueAt: now });
+    }
+  }
+
+  if (data.length > 0) await prisma.formReview.createMany({ data });
+}
+
+type EntryRow = Awaited<ReturnType<typeof prisma.dictionaryEntry.findMany>>[number];
+
+/** Encounters + collected entries + their forms, keyed for the pool builders below. */
+async function collectedContext(userId: string) {
   const encounters = await prisma.encounter.findMany({
     where: { entryId: { not: null }, userId },
-    select: { entryId: true, matchedFormKey: true, createdAt: true },
+    select: { entryId: true, matchedFormKey: true },
   });
   const discoveredByEntry = new Map<number, Set<string>>();
   for (const e of encounters) {
@@ -1146,15 +588,13 @@ export async function getLevelTestAction(track: Track): Promise<LevelTestInfo> {
     s.add(e.matchedFormKey);
     discoveredByEntry.set(e.entryId!, s);
   }
-
-  const entries = await prisma.dictionaryEntry.findMany({
-    where: { id: { in: [...discoveredByEntry.keys()] } },
-  });
-  const familyEntries = entries.filter((e) => families.has(e.type));
-
-  const formVariants = familyEntries.length
+  const entryIds = [...new Set(encounters.map((e) => e.entryId!))];
+  const entries = entryIds.length
+    ? await prisma.dictionaryEntry.findMany({ where: { id: { in: entryIds } } })
+    : [];
+  const formVariants = entries.length
     ? await prisma.dictionaryForm.findMany({
-        where: { entryId: { in: familyEntries.map((e) => e.id) } },
+        where: { entryId: { in: entries.map((e) => e.id) } },
         orderBy: { variantIndex: "asc" },
         select: { entryId: true, formKey: true, accented: true },
       })
@@ -1167,145 +607,679 @@ export async function getLevelTestAction(track: Track): Promise<LevelTestInfo> {
     m.set(f.formKey, arr);
     formsByEntry.set(f.entryId, m);
   }
+  return { entries, formsByEntry, discoveredByEntry };
+}
 
-  // Pool = discovered cells of the family.
-  const pool: { entry: (typeof familyEntries)[number]; formKey: string }[] = [];
-  for (const entry of familyEntries) {
-    for (const formKey of discoveredByEntry.get(entry.id) ?? new Set<string>()) {
-      if (formsByEntry.get(entry.id)?.has(formKey)) pool.push({ entry, formKey });
-    }
-  }
+async function buildCard(
+  entry: EntryRow,
+  reviewKey: string,
+  forms: Map<string, string[]>,
+  isNew: boolean,
+): Promise<PracticeCard> {
+  const { kind, realFormKey } = parseReviewKey(reviewKey);
 
-  const available = pool.length;
-  const insufficient = available < size;
-
-  // Uniform random draw across ALL discovered forms of the family (no recency bias, so the
-  // control isn't dominated by the last words studied).
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  const picked = insufficient ? [] : pool.slice(0, size);
-
-  const questions: LevelTestQuestion[] = picked.map(({ entry, formKey }) => {
-    const forms = formsByEntry.get(entry.id) ?? new Map<string, string[]>();
+  if (kind === "recall") {
     return {
+      kind,
       entryId: entry.id,
+      formKey: realFormKey,
+      reviewKey,
       accented: entry.accented,
+      promptRu: entry.accented,
       bare: entry.bare,
       type: entry.type as WordType,
       typeLabel: WORD_TYPE_LABELS[entry.type as WordType],
       translationsFr: entry.translationsFr,
-      formKey,
-      formLabel: describeFormKey(formKey),
-      hint: hintForForm(entry, forms, formKey),
+      formLabel: realFormKey ? describeFormKey(realFormKey) : "forme du dictionnaire",
+      hint: realFormKey ? hintForForm(entry, forms, realFormKey) : [],
+      isNew,
     };
+  }
+
+  let promptRu = entry.accented;
+  let formLabel = "forme du dictionnaire";
+  if (realFormKey) {
+    const variants = forms.get(realFormKey);
+    if (variants?.[0]) {
+      promptRu = variants[0];
+      formLabel = describeFormKey(realFormKey);
+    }
+  }
+  return {
+    kind,
+    entryId: entry.id,
+    formKey: realFormKey,
+    reviewKey,
+    accented: entry.accented,
+    promptRu,
+    bare: entry.bare,
+    type: entry.type as WordType,
+    typeLabel: WORD_TYPE_LABELS[entry.type as WordType],
+    translationsFr: entry.translationsFr,
+    formLabel,
+    hint: [],
+    isNew: false,
+  };
+}
+
+/** Pick the next practice card, or "empty" when there's nothing due and nothing left to
+ * discover. `theme` filters to a single grammatical theme key (see `themeOf` in queries.ts). */
+export async function getPracticeCardAction(
+  exclude?: string,
+  theme?: string,
+  level?: number,
+): Promise<PracticeCard | "empty"> {
+  const userId = await currentUserId();
+  await ensureReviewSeed(userId);
+  const { entries, formsByEntry, discoveredByEntry } = await collectedContext(userId);
+  const entryMap = new Map(entries.map((e) => [e.id, e]));
+
+  // Optional mastery filter (coming from Collection): keep only words whose average card
+  // level matches, using the same computation as getCollection.
+  let levelOk: (entryId: number) => boolean = () => true;
+  if (level !== undefined) {
+    const reviews = await prisma.formReview.findMany({
+      where: { userId, entryId: { in: entries.map((e) => e.id) } },
+      select: { entryId: true, repetitions: true },
+    });
+    const agg = new Map<number, { sum: number; n: number }>();
+    for (const r of reviews) {
+      const g = agg.get(r.entryId) ?? { sum: 0, n: 0 };
+      g.sum += Math.min(MAX_LEVEL, r.repetitions);
+      g.n += 1;
+      agg.set(r.entryId, g);
+    }
+    levelOk = (entryId) => {
+      const g = agg.get(entryId);
+      return (g && g.n > 0 ? Math.floor(g.sum / g.n) : 0) === level;
+    };
+  }
+
+  const passesTheme = (entryId: number) => {
+    if (!levelOk(entryId)) return false;
+    if (!theme) return true;
+    const entry = entryMap.get(entryId);
+    if (!entry) return false;
+    // Coarse filter ("noun" / "verb" / "adjective") = any sub-theme of that type; otherwise a
+    // specific fine theme key (e.g. "verb-1"), as returned by themeOf.
+    if (theme === "noun" || theme === "verb" || theme === "adjective") return entry.type === theme;
+    return themeOf(entry, formsByEntry.get(entryId) ?? new Map()).key === theme;
+  };
+
+  // 1. Due SRS reviews (recall + translate cards already scheduled). "vocab:" rows belong to
+  // the standalone Traduire exercise and have their own spacing — never surface them here.
+  const dueRaw = await prisma.formReview.findMany({
+    where: { userId, dueAt: { lte: new Date() }, NOT: { formKey: { startsWith: "vocab:" } } },
+    take: 300,
+    select: { entryId: true, formKey: true },
+  });
+  const due = dueRaw.filter((d) => passesTheme(d.entryId));
+  if (due.length > 0) {
+    const choices =
+      exclude && due.length > 1
+        ? due.filter((d) => `${d.entryId}|${d.formKey}` !== exclude)
+        : due;
+    const pick = choices[Math.floor(Math.random() * choices.length)];
+    const entry = entryMap.get(pick.entryId);
+    if (entry) {
+      const forms = formsByEntry.get(pick.entryId) ?? new Map<string, string[]>();
+      return buildCard(entry, pick.formKey, forms, false);
+    }
+  }
+
+  // 2. Undiscovered paradigm cells of a collected word.
+  const pool: { entryId: number; formKey: string }[] = [];
+  for (const entry of entries) {
+    if (entry.type === "other") continue;
+    if (!passesTheme(entry.id)) continue;
+    const keys = [...(formsByEntry.get(entry.id)?.keys() ?? [])];
+    const done = discoveredByEntry.get(entry.id) ?? new Set<string>();
+    for (const formKey of keys) {
+      if (!done.has(formKey)) pool.push({ entryId: entry.id, formKey });
+    }
+  }
+  if (pool.length === 0) return "empty";
+  const choices =
+    exclude && pool.length > 1
+      ? pool.filter((p) => `${p.entryId}|${p.formKey}` !== exclude)
+      : pool;
+  const pick = choices[Math.floor(Math.random() * choices.length)];
+  const entry = entryMap.get(pick.entryId);
+  if (!entry) return "empty";
+  const forms = formsByEntry.get(pick.entryId) ?? new Map<string, string[]>();
+  return buildCard(entry, pick.formKey, forms, true);
+}
+
+export interface PracticeResult {
+  correct: boolean; // true for an exact answer AND for a tolerated one (typo / near-miss)
+  expected: string[]; // accepted answers
+  xp?: XpAward;
+  discovered: boolean; // true if this answer just added the word/form to the collection
+  tolerated: boolean; // accepted despite not matching exactly (IA), i.e. typo
+  close: boolean; // "oui mais" : l'idée y est, le terme n'est pas le bon → crédit partiel
+  note?: string; // courte explication de l'IA sur un "close"
+  level: number; // niveau de compétence de la carte APRÈS cette réponse
+  previousLevel: number; // niveau avant, pour afficher la progression / la rechute
+  levelLabel: string;
+}
+
+export interface SubmitPracticeInput {
+  kind: PracticeKind;
+  entryId: number;
+  formKey: string | null; // real DictionaryForm.formKey (null = lemma), for grading
+  reviewKey: string; // FormReview.formKey to reschedule
+  isNew: boolean;
+  answer: string;
+}
+
+/** Grade any practice card (recall or translation) and reschedule it (SM-2). A correct answer
+ * on an undiscovered cell also records the Encounter — practicing is now a normal way to grow
+ * the collection, not just /add or the word page. */
+export async function submitPracticeAction(input: SubmitPracticeInput): Promise<PracticeResult> {
+  const userId = await currentUserId();
+
+  let correct: boolean;
+  let expected: string[];
+  if (input.kind === "recall") {
+    const forms = input.formKey
+      ? await prisma.dictionaryForm.findMany({
+          where: { entryId: input.entryId, formKey: input.formKey },
+        })
+      : [];
+    expected = forms.map((f) => f.accented);
+    correct = new Set(forms.map((f) => f.bareForm)).has(normalizeBare(input.answer));
+  } else if (input.kind === "translate-ru-fr") {
+    const e = await prisma.dictionaryEntry.findUnique({ where: { id: input.entryId } });
+    expected = (e?.translationsFr ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    correct = expected.map(normalizeFr).includes(normalizeFr(input.answer));
+  } else {
+    // translate-fr-ru
+    if (input.formKey) {
+      const forms = await prisma.dictionaryForm.findMany({
+        where: { entryId: input.entryId, formKey: input.formKey },
+      });
+      expected = forms.map((f) => f.accented);
+      correct = new Set(forms.map((f) => f.bareForm)).has(normalizeBare(input.answer));
+    } else {
+      const e = await prisma.dictionaryEntry.findUnique({ where: { id: input.entryId } });
+      expected = e ? [e.accented] : [];
+      correct = !!e && normalizeBare(input.answer) === e.bare;
+    }
+  }
+
+  // Second opinion from the AI on a miss: tolerate typos (recall / fr→ru) or a close-enough
+  // synonym/paraphrase (ru→fr), so an approximation that isn't the point of the exercise
+  // doesn't feel like a wrong answer. Never runs on an already-correct answer, and any failure
+  // (unconfigured, network) just leaves the deterministic result untouched.
+  let tolerated = false;
+  let close = false;
+  let note: string | undefined;
+  if (!correct && input.answer.trim()) {
+    const aiKind: ToleranceKind = input.kind === "translate-ru-fr" ? "translate" : "recall";
+    const worthAsking = aiKind === "translate" || plausibleTypo(expected, input.answer);
+    if (worthAsking) {
+      const check = await checkAnswerTolerance(aiKind, expected, input.answer);
+      if (check.verdict === "exact") {
+        correct = true;
+        tolerated = true;
+      } else if (check.verdict === "close") {
+        correct = true;
+        close = true;
+        note = check.reason;
+      }
+    }
+  }
+
+  // Un "à peu près" ne fait pas découvrir une case : la forme exacte n'a pas été produite.
+  let discovered = false;
+  if (correct && !close && input.isNew && input.formKey) {
+    await prisma.encounter.create({
+      data: {
+        entryId: input.entryId,
+        rawInput: input.answer.trim(),
+        matchedFormKey: input.formKey,
+        source: "réviser",
+        userId,
+      },
+    });
+    discovered = true;
+    revalidatePath(`/word/${input.entryId}`);
+  }
+
+  const existing = await prisma.formReview.findUnique({
+    where: {
+      userId_entryId_formKey: { userId, entryId: input.entryId, formKey: input.reviewKey },
+    },
+  });
+  const state = existing
+    ? {
+        ease: existing.ease,
+        intervalDays: existing.intervalDays,
+        repetitions: existing.repetitions,
+        lapses: existing.lapses,
+      }
+    : INITIAL_STATE;
+  const next = srsReview(state, correct ? (close ? "hard" : "good") : "again");
+  const now = new Date();
+  const dueAt = nextDueDate(next, now);
+  await prisma.formReview.upsert({
+    where: {
+      userId_entryId_formKey: { userId, entryId: input.entryId, formKey: input.reviewKey },
+    },
+    update: { ...next, dueAt, lastReviewedAt: now },
+    create: {
+      userId,
+      entryId: input.entryId,
+      formKey: input.reviewKey,
+      ...next,
+      dueAt,
+      lastReviewedAt: now,
+    },
   });
 
-  return { track, targetLevel, size, needed, available, insufficient, questions };
+  await prisma.quizAttempt.create({
+    data: {
+      entryId: input.entryId,
+      formKey: input.reviewKey,
+      userAnswer: input.answer,
+      correct,
+      userId,
+    },
+  });
+
+  const xpSource = input.kind === "recall" ? (discovered ? "discover" : "review") : "translate";
+  const xp = correct ? await addXp(userId, xpSource) : undefined;
+  if (discovered) revalidatePath("/");
+  return {
+    correct,
+    expected,
+    xp,
+    discovered,
+    tolerated,
+    close,
+    note,
+    level: levelOf(next),
+    previousLevel: levelOf(state),
+    levelLabel: levelLabel(levelOf(next)),
+  };
 }
 
-export interface LevelTestResult {
-  passed: boolean;
-  validatedLevel: number; // highest validated index after this attempt
-  xp?: XpAward;
+// ---- Apprendre : essai-erreur par classe, et matraquage des irréguliers ----------
+//
+// Distinct de Réviser : on travaille UNE classe à la fois (1re déclinaison singulier, verbes
+// 2e conjugaison pluriel…).
+//   • mode "discover" (formes régulières) : deviner AVANT d'avoir la règle, révéler la règle
+//     en contraste avec la tentative, puis retenter aussitôt — c'est le retry (via
+//     submitPracticeAction) qui compte : XP, découverte, planification SRS.
+//   • mode "rote" (irréguliers) : rien à déduire, on matraque jusqu'à ce que ça rentre.
+
+export interface ScopeAvailability {
+  key: string;
+  words: number; // collected words of this scope
+  remaining: number; // cells of the scope still undiscovered
+  total: number; // cells of the scope in total
 }
 
-/** Finalize a control: if the score meets the threshold, validate the target level. */
-export async function submitLevelTestAction(input: {
-  track: LevelTrack;
-  level: number;
-  score: number;
-  total: number;
-}): Promise<LevelTestResult> {
+/** How much material the user's collection offers for each learn scope. */
+export async function getLearnScopesAction(): Promise<ScopeAvailability[]> {
   const userId = await currentUserId();
-  const passed = input.total > 0 && input.score >= neededCorrect(input.total);
-  let validated = (await getValidatedLevels(userId))[input.track];
-  let xp: XpAward | undefined;
-  if (passed) {
-    const next = await recordValidatedLevel(userId, input.track, input.level);
-    validated = next[input.track];
-    xp = await addXp(userId, "control");
-    revalidatePath("/");
-  }
-  return { passed, validatedLevel: validated, xp };
+  const { entries, formsByEntry, discoveredByEntry } = await collectedContext(userId);
+
+  return allScopes().map((scope) => {
+    let words = 0;
+    let remaining = 0;
+    let total = 0;
+    for (const entry of entries) {
+      const forms = formsByEntry.get(entry.id) ?? new Map<string, string[]>();
+      if (!entryInScope(scope, entry, forms)) continue;
+      const keys = [...forms.keys()].filter((k) => formKeyInScope(scope, k));
+      if (keys.length === 0) continue;
+      words += 1;
+      total += keys.length;
+      const done = discoveredByEntry.get(entry.id) ?? new Set<string>();
+      remaining += keys.filter((k) => !done.has(k)).length;
+    }
+    return { key: scope.key, words, remaining, total };
+  });
 }
 
-// ---- Vocabulary control (valider un palier de vocabulaire, dans l'ordre d'acquisition) ----
-
-export interface VocabTestQuestion {
+export interface FailureDrillCard {
   entryId: number;
-  accented: string;
+  formKey: string;
+  accented: string; // lemma
   bare: string;
+  type: WordType;
+  typeLabel: string;
+  translationsFr: string | null;
+  formLabel: string;
+  alreadyKnown: boolean; // true = cell already discovered (rote mode, or scope exhausted)
+}
+
+/** Pick a cell of `scopeKey` to answer. In "discover" mode it prefers cells not yet
+ * discovered (guess blind, rule after); in "rote" mode — and once a discover scope is
+ * exhausted — it draws from every cell of the scope, since irregulars are drilled by
+ * repetition, not deduction. */
+export async function getLearnCardAction(
+  scopeKey: string,
+  exclude?: string,
+): Promise<FailureDrillCard | "empty"> {
+  const scope = findScope(scopeKey);
+  if (!scope) return "empty";
+  const userId = await currentUserId();
+  const { entries, formsByEntry, discoveredByEntry } = await collectedContext(userId);
+
+  const fresh: { entryId: number; formKey: string }[] = [];
+  const known: { entryId: number; formKey: string }[] = [];
+  for (const entry of entries) {
+    const forms = formsByEntry.get(entry.id) ?? new Map<string, string[]>();
+    if (!entryInScope(scope, entry, forms)) continue;
+    const done = discoveredByEntry.get(entry.id) ?? new Set<string>();
+    for (const formKey of forms.keys()) {
+      if (!formKeyInScope(scope, formKey)) continue;
+      (done.has(formKey) ? known : fresh).push({ entryId: entry.id, formKey });
+    }
+  }
+
+  // Rote always drills the whole class; discover works through the unseen cells first.
+  const pool = scope.mode === "rote" ? [...fresh, ...known] : fresh.length > 0 ? fresh : known;
+  if (pool.length === 0) return "empty";
+
+  const choices =
+    exclude && pool.length > 1
+      ? pool.filter((p) => `${p.entryId}|${p.formKey}` !== exclude)
+      : pool;
+  const pick = choices[Math.floor(Math.random() * choices.length)];
+  const entry = entries.find((e) => e.id === pick.entryId)!;
+  const alreadyKnown = (discoveredByEntry.get(pick.entryId) ?? new Set<string>()).has(pick.formKey);
+
+  return {
+    entryId: entry.id,
+    formKey: pick.formKey,
+    accented: entry.accented,
+    bare: entry.bare,
+    type: entry.type as WordType,
+    typeLabel: WORD_TYPE_LABELS[entry.type as WordType],
+    translationsFr: entry.translationsFr,
+    formLabel: describeFormKey(pick.formKey),
+    alreadyKnown,
+  };
+}
+
+export interface FailureDrillReveal {
+  expected: string[]; // the correct accented form(s)
+  hint: string[]; // the grammar rule for this cell's section
+  guessWasCorrect: boolean; // whether the blind guess happened to already be right
+}
+
+/** Reveal the correct form + rule for a blind guess, and log the guess (namespaced "predict:" —
+ * never touches FormReview scheduling; only the retry, via submitPracticeAction, does). */
+export async function revealFailureDrillAction(input: {
+  entryId: number;
+  formKey: string;
+  guess: string;
+}): Promise<FailureDrillReveal> {
+  const entry = await prisma.dictionaryEntry.findUnique({ where: { id: input.entryId } });
+  const allForms = entry
+    ? await prisma.dictionaryForm.findMany({
+        where: { entryId: input.entryId },
+        orderBy: { variantIndex: "asc" },
+        select: { formKey: true, accented: true, bareForm: true },
+      })
+    : [];
+  const formsByKey = new Map<string, string[]>();
+  for (const f of allForms) {
+    const arr = formsByKey.get(f.formKey) ?? [];
+    arr.push(f.accented);
+    formsByKey.set(f.formKey, arr);
+  }
+  const cell = allForms.filter((f) => f.formKey === input.formKey);
+  const guessWasCorrect =
+    !!input.guess.trim() && new Set(cell.map((f) => f.bareForm)).has(normalizeBare(input.guess));
+
+  const userId = await currentUserId();
+  if (entry) {
+    await prisma.quizAttempt.create({
+      data: {
+        entryId: input.entryId,
+        formKey: `predict:${input.formKey}`,
+        userAnswer: input.guess,
+        correct: guessWasCorrect,
+        userId,
+      },
+    });
+  }
+
+  return {
+    expected: cell.map((f) => f.accented),
+    hint: entry ? hintForForm(entry, formsByKey, input.formKey) : [],
+    guessWasCorrect,
+  };
+}
+
+// ---- Traductions FR : remplissage et correction progressifs par l'IA ---------------
+//
+// La source WikDict est lacunaire (~49 % de couverture) et parfois franchement fausse
+// (добро → « foutre » au lieu de « bien »). Le gloss ANGLAIS d'OpenRussian, lui, est fiable :
+// on s'en sert comme référence pour compléter/corriger le français, au fil des questions,
+// une seule fois par entrée (`frChecked`). Les traductions saisies à la main (`frManual`)
+// ne sont jamais touchées.
+
+type EntryLike = {
+  id: number;
+  accented: string;
+  type: string;
+  translationsFr: string | null;
+  translationsEn: string | null;
+  frManual: boolean;
+  frChecked: boolean;
+};
+
+/**
+ * Ensure an entry's French gloss has been vetted against the English one. Returns the gloss to
+ * use (possibly repaired). Never throws — on any failure the current value is kept.
+ */
+async function ensureFrenchGloss(entry: EntryLike): Promise<string | null> {
+  if (entry.frManual || entry.frChecked) return entry.translationsFr;
+
+  const fix = await repairFrenchGloss({
+    accented: entry.accented,
+    type: entry.type,
+    en: entry.translationsEn,
+    fr: entry.translationsFr,
+  });
+
+  // Mark as checked even when unchanged, so we don't pay for the same call twice.
+  const nextFr = fix.fr ?? entry.translationsFr;
+  await prisma.dictionaryEntry
+    .update({
+      where: { id: entry.id },
+      data: { translationsFr: nextFr, frChecked: true },
+    })
+    .catch(() => {});
+  if (fix.changed) revalidatePath(`/word/${entry.id}`);
+  return nextFr;
+}
+
+// ---- Traduire : vocabulaire pur (forme du dictionnaire, sans décliner ni conjuguer) ----
+
+export type VocabDirection = "ru-fr" | "fr-ru";
+
+export interface VocabCard {
+  entryId: number;
+  accented: string; // lemma, accented
+  type: WordType;
   typeLabel: string;
   translationsFr: string;
+  direction: VocabDirection;
 }
 
-export interface VocabTestInfo {
-  targetLevel: number;
-  size: number;
-  needed: number;
-  available: number;
-  insufficient: boolean;
-  questions: VocabTestQuestion[]; // ordered oldest → newest (acquisition order)
-}
-
-/** Build the vocabulary control for the next unvalidated vocab level. Words are sampled across
- * the collection and presented in the order they were added (oldest first). Translation
- * (ru→fr) is checked via submitTranslateAction. */
-export async function getVocabTestAction(): Promise<VocabTestInfo> {
+/** A collected word to translate at LEMMA level — never an inflected cell, so this stays pure
+ * vocabulary recall. Scheduled in FormReview under "vocab:<dir>" so it has its own spacing,
+ * independent of the form-level cards. */
+export async function getVocabCardAction(
+  direction: VocabDirection,
+  exclude?: string,
+): Promise<VocabCard | "empty"> {
   const userId = await currentUserId();
-  const milestones = milestonesFor("vocabulary");
-  const validated = (await getValidatedLevels(userId)).vocabulary;
-  const targetLevel = Math.min(validated + 1, milestones.length - 1);
-  const size = testSizeForLevel(targetLevel);
-  const needed = neededCorrect(size);
-
-  const encounters = await prisma.encounter.findMany({
+  const enc = await prisma.encounter.findMany({
     where: { entryId: { not: null }, userId },
-    select: { entryId: true, createdAt: true },
+    select: { entryId: true },
+    distinct: ["entryId"],
   });
-  const firstSeen = new Map<number, number>();
-  for (const e of encounters) {
-    const t = e.createdAt.getTime();
-    const prev = firstSeen.get(e.entryId!);
-    if (prev === undefined || t < prev) firstSeen.set(e.entryId!, t);
-  }
+  const ids = enc.map((e) => e.entryId!);
+  if (ids.length === 0) return "empty";
 
+  // An entry with no FR gloss yet is still eligible: the AI fills it in below, from the
+  // English one. Only entries with neither FR nor EN are unusable.
   const entries = await prisma.dictionaryEntry.findMany({
-    where: { id: { in: [...firstSeen.keys()] }, translationsFr: { not: null } },
+    where: {
+      id: { in: ids },
+      OR: [{ translationsFr: { not: null } }, { translationsEn: { not: null } }],
+    },
   });
-  // Acquisition order: oldest first.
-  entries.sort((a, b) => (firstSeen.get(a.id) ?? 0) - (firstSeen.get(b.id) ?? 0));
+  if (entries.length === 0) return "empty";
 
-  const available = entries.length;
-  const insufficient = available < size;
+  // Prefer words whose vocab card is due (or never seen); fall back to the whole collection.
+  const reviewKey = `vocab:${direction}`;
+  const rows = await prisma.formReview.findMany({
+    where: { userId, formKey: reviewKey, entryId: { in: entries.map((e) => e.id) } },
+    select: { entryId: true, dueAt: true },
+  });
+  const dueAtByEntry = new Map(rows.map((r) => [r.entryId, r.dueAt]));
+  const now = new Date();
+  const dueOrNew = entries.filter((e) => {
+    const d = dueAtByEntry.get(e.id);
+    return d === undefined || d <= now;
+  });
+  const pool = dueOrNew.length > 0 ? dueOrNew : entries;
 
-  // Evenly sample `size` words across the whole history so the control spans early and recent
-  // vocabulary, while keeping them in acquisition order.
-  let chosen: typeof entries = [];
-  if (!insufficient) {
-    const step = available / size;
-    const idxs = new Set<number>();
-    for (let i = 0; i < size; i++) idxs.add(Math.min(available - 1, Math.floor(i * step)));
-    // Top up if rounding produced duplicates.
-    let k = 0;
-    while (idxs.size < size && k < available) {
-      idxs.add(k);
-      k++;
-    }
-    chosen = [...idxs].sort((a, b) => a - b).map((i) => entries[i]);
+  const choices =
+    exclude && pool.length > 1 ? pool.filter((e) => String(e.id) !== exclude) : pool;
+  const pick = choices[Math.floor(Math.random() * choices.length)];
+
+  // Vet the French gloss against the English one before showing (or grading) it.
+  const fr = await ensureFrenchGloss(pick);
+  if (!fr) return "empty";
+
+  return {
+    entryId: pick.id,
+    accented: pick.accented,
+    type: pick.type as WordType,
+    typeLabel: WORD_TYPE_LABELS[pick.type as WordType],
+    translationsFr: fr,
+    direction,
+  };
+}
+
+/** Grade a vocabulary card (lemma level) and schedule it under its own "vocab:<dir>" key.
+ * Same lenient AI second opinion as Réviser. */
+export async function submitVocabAction(input: {
+  entryId: number;
+  direction: VocabDirection;
+  answer: string;
+}): Promise<PracticeResult> {
+  const userId = await currentUserId();
+  const entry = await prisma.dictionaryEntry.findUnique({ where: { id: input.entryId } });
+  if (!entry) {
+    return {
+      correct: false,
+      expected: [],
+      discovered: false,
+      tolerated: false,
+      close: false,
+      level: 0,
+      previousLevel: 0,
+      levelLabel: levelLabel(0),
+    };
   }
 
-  const questions: VocabTestQuestion[] = chosen.map((e) => ({
-    entryId: e.id,
-    accented: e.accented,
-    bare: e.bare,
-    typeLabel: WORD_TYPE_LABELS[e.type as WordType],
-    translationsFr: e.translationsFr!,
-  }));
+  let correct: boolean;
+  let expected: string[];
+  if (input.direction === "ru-fr") {
+    // Same vetted gloss as the one shown on the card (no-op if already checked).
+    const fr = await ensureFrenchGloss(entry);
+    expected = (fr ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    correct = expected.map(normalizeFr).includes(normalizeFr(input.answer));
+  } else {
+    expected = [entry.accented];
+    correct = normalizeBare(input.answer) === entry.bare;
+  }
 
-  return { targetLevel, size, needed, available, insufficient, questions };
+  let tolerated = false;
+  let close = false;
+  let note: string | undefined;
+  if (!correct && input.answer.trim()) {
+    const aiKind: ToleranceKind = input.direction === "ru-fr" ? "translate" : "recall";
+    const worthAsking = aiKind === "translate" || plausibleTypo(expected, input.answer);
+    if (worthAsking) {
+      const check = await checkAnswerTolerance(aiKind, expected, input.answer);
+      if (check.verdict === "exact") {
+        correct = true;
+        tolerated = true;
+      } else if (check.verdict === "close") {
+        correct = true;
+        close = true;
+        note = check.reason;
+      }
+    }
+  }
+
+  const reviewKey = `vocab:${input.direction}`;
+  const existing = await prisma.formReview.findUnique({
+    where: { userId_entryId_formKey: { userId, entryId: input.entryId, formKey: reviewKey } },
+  });
+  const state = existing
+    ? {
+        ease: existing.ease,
+        intervalDays: existing.intervalDays,
+        repetitions: existing.repetitions,
+        lapses: existing.lapses,
+      }
+    : INITIAL_STATE;
+  const next = srsReview(state, correct ? (close ? "hard" : "good") : "again");
+  const now = new Date();
+  const dueAt = nextDueDate(next, now);
+  await prisma.formReview.upsert({
+    where: { userId_entryId_formKey: { userId, entryId: input.entryId, formKey: reviewKey } },
+    update: { ...next, dueAt, lastReviewedAt: now },
+    create: {
+      userId,
+      entryId: input.entryId,
+      formKey: reviewKey,
+      ...next,
+      dueAt,
+      lastReviewedAt: now,
+    },
+  });
+  await prisma.quizAttempt.create({
+    data: {
+      entryId: input.entryId,
+      formKey: reviewKey,
+      userAnswer: input.answer,
+      correct,
+      userId,
+    },
+  });
+
+  const xp = correct ? await addXp(userId, "translate") : undefined;
+  return {
+    correct,
+    expected,
+    xp,
+    discovered: false,
+    tolerated,
+    close,
+    note,
+    level: levelOf(next),
+    previousLevel: levelOf(state),
+    levelLabel: levelLabel(levelOf(next)),
+  };
 }
 
 // ---- TORFL production grading (Mistral) ------------------------------------------

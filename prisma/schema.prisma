@@ -28,6 +28,9 @@ model DictionaryEntry {
   partner        String? // aspectual partner (verbs) or counterpart
   translationsFr String?
   frManual       Boolean @default(false) // true = user-entered FR translation (preserved across reseed)
+  // true = the FR gloss was filled/repaired by the AI against the (reliable) EN gloss, at
+  // question time. Prevents re-checking the same entry on every card. See ensureFrenchGloss().
+  frChecked      Boolean @default(false)
   translationsEn String?
   translationsDe String?
 

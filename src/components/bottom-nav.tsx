@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Route, Library, Plus, BookOpen, GraduationCap, User } from "lucide-react";
+import { Home, Dumbbell, Library, Plus, User } from "lucide-react";
 
+// 5 entrées : Accueil / Exercices / Collection / Ajouter (central) / Profil. Référence, Cas,
+// Chiffres et Validation vivent désormais sous Profil (page "Ressources").
 const ITEMS = [
   { href: "/", label: "Accueil", icon: Home, exact: true },
+  { href: "/exercices", label: "Exercices", icon: Dumbbell },
   { href: "/collection", label: "Collection", icon: Library },
-  { href: "/parcours", label: "Parcours", icon: Route },
   { href: "/add", label: "Ajouter", icon: Plus, central: true },
-  { href: "/reference", label: "Référence", icon: BookOpen },
-  { href: "/validation", label: "Validation", icon: GraduationCap },
   { href: "/profil", label: "Profil", icon: User },
 ] as const;
 

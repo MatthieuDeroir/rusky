@@ -1,4 +1,5 @@
-import { Flame, Snowflake, Star, Trophy, LogOut } from "lucide-react";
+import Link from "next/link";
+import { Flame, Snowflake, Star, Trophy, LogOut, BookOpen, Hash, GraduationCap, Award, ArrowRight } from "lucide-react";
 import { currentUserId, signOut, devBypass } from "@/lib/auth";
 import { getGameStats } from "@/lib/xp";
 import { getLevel } from "@/lib/game-levels";
@@ -81,6 +82,17 @@ export default async function ProfilPage() {
         </div>
       </section>
 
+      {/* Ressources : consultation et validation, en dehors de la boucle d'entraînement */}
+      <section className="glass rounded-3xl p-6">
+        <h2 className="mb-4 font-medium">Ressources</h2>
+        <div className="grid grid-cols-2 gap-2">
+          <ResourceLink href="/reference" icon={<BookOpen className="size-4" />} label="Référence" />
+          <ResourceLink href="/cas" icon={<Award className="size-4" />} label="Cas" />
+          <ResourceLink href="/chiffres" icon={<Hash className="size-4" />} label="Chiffres" />
+          <ResourceLink href="/validation" icon={<GraduationCap className="size-4" />} label="Validation TORFL" />
+        </div>
+      </section>
+
       {!devBypass && (
         <form
           action={async () => {
@@ -98,6 +110,29 @@ export default async function ProfilPage() {
         </form>
       )}
     </div>
+  );
+}
+
+function ResourceLink({
+  href,
+  icon,
+  label,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center justify-between gap-2 rounded-xl bg-white/[0.03] px-3.5 py-2.5 text-sm ring-1 ring-white/10 transition-colors hover:bg-white/10"
+    >
+      <span className="flex items-center gap-2 text-foreground/80">
+        {icon}
+        {label}
+      </span>
+      <ArrowRight className="size-3.5 text-foreground/35" />
+    </Link>
   );
 }
 

@@ -7,7 +7,7 @@ import { stripStress } from "./grammar";
 /** Rule lines keyed by paradigm-section title (e.g. "Présent / Futur", "Déclinaison"). */
 export type RuleMap = Record<string, string[]>;
 
-type Forms = Map<string, string[]>;
+export type Forms = Map<string, string[]>;
 
 const low = (s: string) => stripStress(s).toLowerCase().trim();
 const first = (forms: Forms, key: string) => forms.get(key)?.[0];

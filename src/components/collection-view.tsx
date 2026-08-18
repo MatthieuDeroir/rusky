@@ -13,6 +13,7 @@ import {
   type WordType,
 } from "@/lib/grammar";
 import type { CollectionItem } from "@/lib/queries";
+import { MAX_LEVEL, levelLabel } from "@/lib/srs";
 import { deleteWordAction } from "@/app/actions";
 import { ProgressRing } from "@/components/progress-ring";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -36,10 +37,12 @@ interface TypeStat {
   total: number;
 }
 
-type Sort = "alpha" | "recent";
+type Sort = "alpha" | "recent" | "level" | "level-desc";
+type LevelFilter = number | "all";
 
 export function CollectionView({ items }: { items: CollectionItem[] }) {
   const [filter, setFilter] = useState<Filter>("all");
+  const [levelFilter, setLevelFilter] = useState<LevelFilter>("all");
   const [sort, setSort] = useState<Sort>("alpha");
   const [query, setQuery] = useState("");
   const [pending, setPending] = useState<CollectionItem | null>(null);
@@ -78,6 +81,15 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
     return { stats, overall: { discovered: dAll, total: tAll } };
   }, [items]);
 
+  // Word counts per mastery level, within the current type filter.
+  const levelCounts = useMemo(() => {
+    const pool = items.filter((it) => filter === "all" || it.type === filter);
+    return Array.from({ length: MAX_LEVEL + 1 }, (_, level) => ({
+      level,
+      count: pool.filter((it) => it.level === level).length,
+    }));
+  }, [items, filter]);
+
   const q = query.trim();
   const qBare = normalizeBare(q); // matches the Russian word
   const qFr = normalizeFr(q); // matches the French translation
@@ -86,11 +98,16 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
     normalizeBare(it.bare).includes(qBare) ||
     (!!it.translationsFr && normalizeFr(it.translationsFr).includes(qFr));
 
-  const bySort = (a: CollectionItem, b: CollectionItem) =>
-    sort === "recent" ? b.firstSeen - a.firstSeen : a.bare.localeCompare(b.bare, "ru");
+  const bySort = (a: CollectionItem, b: CollectionItem) => {
+    if (sort === "recent") return b.firstSeen - a.firstSeen;
+    if (sort === "level") return a.level - b.level || a.bare.localeCompare(b.bare, "ru");
+    if (sort === "level-desc") return b.level - a.level || a.bare.localeCompare(b.bare, "ru");
+    return a.bare.localeCompare(b.bare, "ru");
+  };
 
   const shown = items
     .filter((it) => filter === "all" || it.type === filter)
+    .filter((it) => levelFilter === "all" || it.level === levelFilter)
     .filter(matchesSearch);
   const shownGrouped = TYPE_ORDER.filter((t) => shown.some((i) => i.type === t)).map(
     (t) => [t, shown.filter((i) => i.type === t).sort(bySort)] as const,
@@ -136,6 +153,8 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
             [
               ["alpha", "A→Я"],
               ["recent", "Récents"],
+              ["level", "Maîtrise ↑"],
+              ["level-desc", "Maîtrise ↓"],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -152,6 +171,46 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Mastery-level filter — pick a level, then drill exactly those words */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs uppercase tracking-wide text-foreground/40">Maîtrise</span>
+        <button
+          type="button"
+          onClick={() => setLevelFilter("all")}
+          className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+            levelFilter === "all"
+              ? "bg-primary/40 text-foreground"
+              : "bg-white/5 text-foreground/60 hover:text-foreground"
+          }`}
+        >
+          Tous
+        </button>
+        {levelCounts.map(({ level, count }) => (
+          <button
+            key={level}
+            type="button"
+            onClick={() => setLevelFilter(level)}
+            disabled={count === 0}
+            className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-30 ${
+              levelFilter === level
+                ? "bg-primary/40 text-foreground"
+                : "bg-white/5 text-foreground/60 hover:text-foreground"
+            }`}
+            title={levelLabel(level)}
+          >
+            N{level} · {count}
+          </button>
+        ))}
+        {levelFilter !== "all" && shown.length > 0 && (
+          <Link
+            href={`/exercices/reviser?level=${levelFilter}`}
+            className="ml-auto rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/85"
+          >
+            Travailler ces {shown.length} mot{shown.length > 1 ? "s" : ""} →
+          </Link>
+        )}
       </div>
 
       {q && shown.length === 0 && (
@@ -173,6 +232,7 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
                   href={`/word/${it.id}`}
                   className="glass glass-lift flex items-center gap-2 rounded-xl py-2 pl-3 pr-2.5 hover:bg-white/10"
                 >
+                  <LevelDot level={it.level} cards={it.cards} dueSoon={it.dueSoon} />
                   <span className="shrink-0 font-display text-lg leading-none">
                     {displayAccent(it.accented)}
                   </span>
@@ -228,6 +288,46 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
         onCancel={() => !isDeleting && setPending(null)}
       />
     </div>
+  );
+}
+
+// Mastery at a glance: a small bar whose fill and colour track the word's level (0 = never
+// practised / dropped back to zero, MAX_LEVEL = mastered).
+const LEVEL_COLOR = [
+  "bg-white/15", // 0 — à apprendre
+  "bg-red-400/70", // 1 — fragile
+  "bg-orange-400/70", // 2 — en cours
+  "bg-amber-400/80", // 3 — solide
+  "bg-lime-400/80", // 4 — ancré
+  "bg-emerald-400", // 5 — maîtrisé
+];
+
+function LevelDot({
+  level,
+  cards,
+  dueSoon,
+}: {
+  level: number;
+  cards: number;
+  dueSoon: boolean;
+}) {
+  const title =
+    cards === 0
+      ? "Jamais travaillé"
+      : `Niveau ${level} · ${levelLabel(level)}${dueSoon ? " · à revoir maintenant" : ""}`;
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      className="flex h-6 w-1 shrink-0 flex-col-reverse gap-px overflow-hidden rounded-full bg-white/8"
+    >
+      {Array.from({ length: MAX_LEVEL }, (_, i) => (
+        <span
+          key={i}
+          className={`flex-1 ${i < level ? LEVEL_COLOR[level] : "bg-transparent"}`}
+        />
+      ))}
+    </span>
   );
 }
 

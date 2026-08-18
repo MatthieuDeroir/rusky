@@ -21,7 +21,7 @@ export function HomeProgress({ rows }: { rows: TypeProgress[] }) {
         const nextTier = nextBoundary ? progressTier(nextBoundary) : null;
 
         return (
-          <Link key={r.type} href="/parcours" className="glass glass-lift rounded-2xl p-4">
+          <Link key={r.type} href="/collection" className="glass glass-lift rounded-2xl p-4">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-[11px] uppercase tracking-[0.18em] text-foreground/40">

@@ -1,44 +1,69 @@
 import Link from "next/link";
-import { getThemes } from "@/lib/queries";
+import { ArrowRight, GraduationCap, Languages, Repeat } from "lucide-react";
 import { currentUserId } from "@/lib/auth";
-import { ExercicesBrowser } from "@/components/exercices-browser";
-import { Button } from "@/components/ui/button";
+import { dueReviewCount } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Exercices · Русский" };
 
-export default async function ExercicesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ type?: string }>;
-}) {
-  const { type } = await searchParams;
+export default async function ExercicesPage() {
   const userId = await currentUserId();
-  const themes = await getThemes(userId);
+  const due = await dueReviewCount(userId);
 
-  if (themes.length === 0) {
-    return (
-      <div className="glass-strong mx-auto mt-10 max-w-xl rounded-3xl p-10 text-center">
-        <h1 className="text-2xl font-semibold">Aucun thème pour l’instant</h1>
-        <p className="mt-3 text-foreground/65">
-          Ajoute des mots à ta collection : ils seront regroupés ici par type puis par
-          déclinaison / conjugaison.
-        </p>
-        <Button render={<Link href="/add" />} nativeButton={false} size="lg" className="mt-6">
-          Ajouter un mot
-        </Button>
-      </div>
-    );
-  }
+  const cards = [
+    {
+      href: "/exercices/reviser",
+      icon: Repeat,
+      title: "Réviser",
+      desc:
+        due > 0
+          ? `${due} forme${due > 1 ? "s" : ""} à revoir maintenant, plus les nouvelles à découvrir.`
+          : "Rappels espacés et nouvelles formes, mélangés dans une seule file.",
+    },
+    {
+      href: "/exercices/apprendre",
+      icon: GraduationCap,
+      title: "Apprendre",
+      desc:
+        "Une classe à la fois : déclinaisons et conjugaisons par essai-erreur, irréguliers par cœur.",
+    },
+    {
+      href: "/exercices/traduire",
+      icon: Languages,
+      title: "Traduire",
+      desc: "Vocabulaire pur : la forme du dictionnaire, sans décliner ni conjuguer.",
+    },
+  ];
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-3xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Exercices par thème</h1>
-        <p className="text-sm text-foreground/55">
-          Choisis un type, puis une déclinaison / conjugaison, et entraîne-toi sur ce groupe.
+        <h1 className="font-display text-3xl">Exercices</h1>
+        <p className="mt-1 text-sm text-foreground/55">
+          Trois façons de travailler tes mots, selon ce dont tu as besoin aujourd’hui.
         </p>
       </div>
-      <ExercicesBrowser themes={themes} initialType={type} />
+
+      <div className="grid grid-cols-1 gap-3">
+        {cards.map(({ href, icon: Icon, title, desc }) => (
+          <Link
+            key={href}
+            href={href}
+            className="glass glass-lift group flex items-center justify-between gap-4 rounded-2xl p-5"
+          >
+            <div className="flex min-w-0 items-start gap-4">
+              <span className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary">
+                <Icon className="size-5" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="font-display text-xl">{title}</h2>
+                <p className="mt-0.5 text-sm text-foreground/60">{desc}</p>
+              </div>
+            </div>
+            <ArrowRight className="size-5 shrink-0 text-foreground/35 transition-colors group-hover:text-primary" />
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
