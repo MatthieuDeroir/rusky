@@ -673,34 +673,13 @@ async function buildCard(
 export async function getPracticeCardAction(
   exclude?: string,
   theme?: string,
-  level?: number,
 ): Promise<PracticeCard | "empty"> {
   const userId = await currentUserId();
   await ensureReviewSeed(userId);
   const { entries, formsByEntry, discoveredByEntry } = await collectedContext(userId);
   const entryMap = new Map(entries.map((e) => [e.id, e]));
 
-  // Optional mastery filter (coming from Collection): keep only words whose base-form level
-  // matches — same computation as getCollection (le meilleur des cartes vocab:ru-fr/fr-ru).
-  let levelOk: (entryId: number) => boolean = () => true;
-  if (level !== undefined) {
-    const reviews = await prisma.formReview.findMany({
-      where: {
-        userId,
-        entryId: { in: entries.map((e) => e.id) },
-        formKey: { startsWith: "vocab:" },
-      },
-      select: { entryId: true, repetitions: true },
-    });
-    const agg = new Map<number, number>();
-    for (const r of reviews) {
-      agg.set(r.entryId, Math.max(agg.get(r.entryId) ?? 0, Math.min(MAX_LEVEL, r.repetitions)));
-    }
-    levelOk = (entryId) => (agg.get(entryId) ?? 0) === level;
-  }
-
   const passesTheme = (entryId: number) => {
-    if (!levelOk(entryId)) return false;
     if (!theme) return true;
     const entry = entryMap.get(entryId);
     if (!entry) return false;
@@ -752,6 +731,45 @@ export async function getPracticeCardAction(
   if (!entry) return "empty";
   const forms = formsByEntry.get(pick.entryId) ?? new Map<string, string[]>();
   return buildCard(entry, pick.formKey, forms, true);
+}
+
+/** Pick a card among those whose MOST RECENT attempt was wrong (recall or translate — pas les
+ * cartes Traduire, qui ont leur propre forme/écran). "Le plus récent" pour ne pas redonner un
+ * mot que tu as depuis retrouvé : une seule bonne réponse plus tard suffit à le sortir du lot. */
+export async function getMistakeCardAction(exclude?: string): Promise<PracticeCard | "empty"> {
+  const userId = await currentUserId();
+  const attempts = await prisma.quizAttempt.findMany({
+    where: {
+      userId,
+      OR: [
+        { formKey: { startsWith: TRANSLATE_PREFIX_RU_FR } },
+        { formKey: { startsWith: TRANSLATE_PREFIX_FR_RU } },
+        { formKey: { not: { contains: ":" } } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: 1000,
+    select: { entryId: true, formKey: true, correct: true },
+  });
+  const latestByKey = new Map<string, { entryId: number; formKey: string; correct: boolean }>();
+  for (const a of attempts) {
+    const key = `${a.entryId}|${a.formKey}`;
+    if (!latestByKey.has(key)) latestByKey.set(key, a);
+  }
+  const wrong = [...latestByKey.values()].filter((a) => !a.correct);
+  if (wrong.length === 0) return "empty";
+
+  const { entries, formsByEntry } = await collectedContext(userId);
+  const entryMap = new Map(entries.map((e) => [e.id, e]));
+  const choices =
+    exclude && wrong.length > 1
+      ? wrong.filter((a) => `${a.entryId}|${a.formKey}` !== exclude)
+      : wrong;
+  const pick = choices[Math.floor(Math.random() * choices.length)];
+  const entry = entryMap.get(pick.entryId);
+  if (!entry) return "empty";
+  const forms = formsByEntry.get(pick.entryId) ?? new Map<string, string[]>();
+  return buildCard(entry, pick.formKey, forms, false);
 }
 
 export interface PracticeResult {
@@ -1325,6 +1343,7 @@ export interface VocabCard {
 export async function getVocabCardAction(
   direction: VocabDirection,
   exclude?: string,
+  level?: number,
 ): Promise<VocabCard | "empty"> {
   const userId = await currentUserId();
   const enc = await prisma.encounter.findMany({
@@ -1337,13 +1356,35 @@ export async function getVocabCardAction(
 
   // An entry with no FR gloss yet is still eligible: the AI fills it in below, from the
   // English one. Only entries with neither FR nor EN are unusable.
-  const entries = await prisma.dictionaryEntry.findMany({
+  let entries = await prisma.dictionaryEntry.findMany({
     where: {
       id: { in: ids },
       OR: [{ translationsFr: { not: null } }, { translationsEn: { not: null } }],
     },
   });
   if (entries.length === 0) return "empty";
+
+  // Optional mastery filter (coming from Collection) : niveau de la forme de base, càd le
+  // meilleur des deux cartes vocab:ru-fr/fr-ru — même calcul que getCollection.
+  if (level !== undefined) {
+    const vocabReviews = await prisma.formReview.findMany({
+      where: {
+        userId,
+        entryId: { in: entries.map((e) => e.id) },
+        formKey: { startsWith: "vocab:" },
+      },
+      select: { entryId: true, repetitions: true },
+    });
+    const levelByEntry = new Map<number, number>();
+    for (const r of vocabReviews) {
+      levelByEntry.set(
+        r.entryId,
+        Math.max(levelByEntry.get(r.entryId) ?? 0, Math.min(MAX_LEVEL, r.repetitions)),
+      );
+    }
+    entries = entries.filter((e) => (levelByEntry.get(e.id) ?? 0) === level);
+    if (entries.length === 0) return "empty";
+  }
 
   // Prefer words whose vocab card is due (or never seen); fall back to the whole collection.
   const reviewKey = `vocab:${direction}`;

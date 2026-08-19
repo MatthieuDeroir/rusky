@@ -53,10 +53,48 @@ await png(iconSvg(512, { rounded: true, scale: 0.62 }), 512, "icon-512.png");
 await png(iconSvg(512, { rounded: false, scale: 0.5 }), 512, "icon-maskable-512.png");
 await png(iconSvg(512, { rounded: true, scale: 0.62 }), 180, "apple-icon.png");
 
-// Favicon: ship the SVG directly (Next serves src/app/icon.svg as the favicon).
+// Favicon: ship the SVG directly (Next serves src/app/icon.svg as the favicon)...
 writeFileSync(
   join(appDir, "icon.svg"),
   iconSvg(64, { rounded: true, scale: 0.62 }),
   "utf8",
 );
 console.log("✓ src/app/icon.svg");
+
+// ...but Safari and some tab-icon contexts still only look at favicon.ico, so it must carry
+// the same logo, not the leftover Next.js default. ICO (Vista+) can embed PNGs directly —
+// build the container by hand rather than pull in a whole ico-writing dependency.
+function buildIco(images) {
+  const count = images.length;
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(1, 2); // type = icon
+  header.writeUInt16LE(count, 4);
+  let offset = 6 + count * 16;
+  const entries = [];
+  const bodies = [];
+  for (const { size, buf } of images) {
+    const entry = Buffer.alloc(16);
+    entry.writeUInt8(size >= 256 ? 0 : size, 0);
+    entry.writeUInt8(size >= 256 ? 0 : size, 1);
+    entry.writeUInt16LE(1, 4); // planes
+    entry.writeUInt16LE(32, 6); // bits per pixel
+    entry.writeUInt32LE(buf.length, 8);
+    entry.writeUInt32LE(offset, 12);
+    entries.push(entry);
+    bodies.push(buf);
+    offset += buf.length;
+  }
+  return Buffer.concat([header, ...entries, ...bodies]);
+}
+
+const favSizes = [16, 32, 48];
+const favImages = [];
+for (const size of favSizes) {
+  const buf = await sharp(Buffer.from(iconSvg(size, { rounded: true, scale: 0.62 })))
+    .resize(size, size)
+    .png()
+    .toBuffer();
+  favImages.push({ size, buf });
+}
+writeFileSync(join(appDir, "favicon.ico"), buildIco(favImages));
+console.log("✓ src/app/favicon.ico");

@@ -205,7 +205,7 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
         ))}
         {levelFilter !== "all" && shown.length > 0 && (
           <Link
-            href={`/exercices/reviser?level=${levelFilter}`}
+            href={`/exercices/traduire?level=${levelFilter}`}
             className="ml-auto rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/85"
           >
             Travailler ces {shown.length} mot{shown.length > 1 ? "s" : ""} →

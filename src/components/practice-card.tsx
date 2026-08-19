@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import {
   getPracticeCardAction,
+  getMistakeCardAction,
   submitPracticeAction,
   refinePracticeVerdictAction,
   type PracticeCard as PracticeCardData,
@@ -34,11 +35,11 @@ function resultRingClass(result: PracticeResult | null): string {
 
 export function PracticeCard({
   themes,
-  level,
+  mistakesOnly,
 }: {
   themes: ThemeOption[];
-  /** Restrict the queue to words at this mastery level (from Collection). */
-  level?: number;
+  /** true = ne piocher que dans les cartes dont la dernière tentative était fausse. */
+  mistakesOnly?: boolean;
 }) {
   const [theme, setTheme] = useState<string | undefined>(undefined);
   const [question, setQuestion] = useState<PracticeCardData | "empty" | null>(null);
@@ -57,7 +58,9 @@ export function PracticeCard({
   const load = useCallback(
     (exclude?: string) => {
       startLoad(async () => {
-        const q = await getPracticeCardAction(exclude, theme, level);
+        const q = mistakesOnly
+          ? await getMistakeCardAction(exclude)
+          : await getPracticeCardAction(exclude, theme);
         questionGen.current += 1;
         setQuestion(q);
         setAnswer("");
@@ -65,14 +68,14 @@ export function PracticeCard({
         setTimeout(() => answerRef.current?.focus(), 0);
       });
     },
-    [theme, level],
+    [theme, mistakesOnly],
   );
 
   useEffect(() => {
     load();
     // Changing the theme filter starts a fresh card, not the score.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [theme, level]);
+  }, [theme]);
 
   function check() {
     if (!question || question === "empty" || result || !answer.trim()) return;
@@ -107,18 +110,23 @@ export function PracticeCard({
   if (question === "empty") {
     return (
       <div className="space-y-4">
-        {themes.length > 1 && (
+        {!mistakesOnly && themes.length > 1 && (
           <ThemeFilter themes={themes} value={theme} onChange={setTheme} />
         )}
         <div className="glass-strong rounded-3xl p-10 text-center">
-          <h2 className="text-xl font-semibold">Rien à réviser 🎉</h2>
+          <h2 className="text-xl font-semibold">
+            {mistakesOnly ? "Aucune erreur en attente 🎉" : "Rien à réviser 🎉"}
+          </h2>
           <p className="mt-2 text-foreground/65">
-            Tu es à jour ! Les formes reviendront à réviser au fil des jours. Découvre de
-            nouveaux mots en attendant.
+            {mistakesOnly
+              ? "Tous tes derniers essais sur ces mots sont réussis — reviens ici après une session de Réviser ou Traduire."
+              : "Tu es à jour ! Les formes reviendront à réviser au fil des jours. Découvre de nouveaux mots en attendant."}
           </p>
-          <Button render={<Link href="/add" />} nativeButton={false} className="mt-6">
-            Ajouter un mot
-          </Button>
+          {!mistakesOnly && (
+            <Button render={<Link href="/add" />} nativeButton={false} className="mt-6">
+              Ajouter un mot
+            </Button>
+          )}
         </div>
         <VerifyPile pile={verify.history} />
       </div>
@@ -150,7 +158,7 @@ export function PracticeCard({
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
-        {themes.length > 1 ? (
+        {!mistakesOnly && themes.length > 1 ? (
           <ThemeFilter themes={themes} value={theme} onChange={setTheme} />
         ) : (
           <span />

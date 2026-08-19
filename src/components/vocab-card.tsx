@@ -28,7 +28,7 @@ function ringClass(result: PracticeResult | null): string {
     : "ring-2 ring-emerald-400/60";
 }
 
-export function VocabCard() {
+export function VocabCard({ level }: { level?: number }) {
   const [direction, setDirection] = useState<VocabDirection>("ru-fr");
   const [card, setCard] = useState<VocabCardData | "empty" | null>(null);
   const [answer, setAnswer] = useState("");
@@ -43,7 +43,7 @@ export function VocabCard() {
   const load = useCallback(
     (exclude?: string) => {
       startLoad(async () => {
-        const c = await getVocabCardAction(direction, exclude);
+        const c = await getVocabCardAction(direction, exclude, level);
         cardGen.current += 1;
         setCard(c);
         setAnswer("");
@@ -51,7 +51,7 @@ export function VocabCard() {
         setTimeout(() => answerRef.current?.focus(), 0);
       });
     },
-    [direction],
+    [direction, level],
   );
 
   useEffect(() => {

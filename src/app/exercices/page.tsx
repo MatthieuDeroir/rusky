@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, GraduationCap, Languages, Repeat } from "lucide-react";
+import { ArrowRight, GraduationCap, Languages, Repeat, RotateCcw } from "lucide-react";
 import { currentUserId } from "@/lib/auth";
 import { dueReviewCount } from "@/lib/queries";
 
@@ -32,6 +32,12 @@ export default async function ExercicesPage() {
       icon: Languages,
       title: "Traduire",
       desc: "Vocabulaire pur : la forme du dictionnaire, sans décliner ni conjuguer.",
+    },
+    {
+      href: "/exercices/erreurs",
+      icon: RotateCcw,
+      title: "Travailler ses erreurs",
+      desc: "Uniquement les mots dont la dernière réponse était fausse, jusqu’à les reprendre.",
     },
   ];
 
