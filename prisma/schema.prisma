@@ -87,6 +87,10 @@ model QuizAttempt {
   formKey    String
   userAnswer String
   correct    Boolean
+  // Genre du raté, quand l'IA en a jugé un ("autre-mot" | "autre-forme" | "oubli") — null sur
+  // une réponse correcte ou quand l'IA n'a pas tranché. Voir checkAnswerTolerance().
+  mistakeKind String?
+  note        String? // courte explication IA (raison du "close" ou du rejet), pour l'historique
   createdAt  DateTime @default(now())
 
   entry DictionaryEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)

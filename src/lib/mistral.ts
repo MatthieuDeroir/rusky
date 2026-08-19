@@ -265,9 +265,26 @@ export type ToleranceKind = "recall" | "translate";
  * (crédit partiel, la carte revient plus tôt) ; "wrong" = refusé. */
 export type ToleranceVerdict = "exact" | "close" | "wrong";
 
+/** Catégorie du raté, pour que l'appli se souvienne du GENRE d'erreur (pas juste "faux") :
+ * - "autre-mot" : un autre mot russe/français entièrement, sans lien de sens ni de forme.
+ * - "autre-forme" : la bonne famille de sens mais la mauvaise nature grammaticale (un verbe
+ *   pour un adjectif, une autre case/personne, etc.) — ex. гото́вый ↔ гото́вить.
+ * - "oubli" : réponse qui n'a manifestement rien à voir (au hasard, ponctuation, lettres
+ *   tapées pour passer au mot suivant sans savoir).
+ */
+export type MistakeKind = "autre-mot" | "autre-forme" | "oubli";
+
 export interface ToleranceCheck {
   verdict: ToleranceVerdict;
-  reason?: string; // courte explication en français, montrée sur un "close"
+  reason?: string; // courte explication en français, montrée sur un "close" ou un rejet
+  mistakeKind?: MistakeKind; // seulement quand verdict === "wrong"
+}
+
+/** Une réponse sans une seule lettre (ponctuation seule, espaces) ne peut jamais être une
+ * traduction ou une forme valide — inutile de payer un appel IA pour le savoir, et ça évite
+ * qu'un modèle trop généreux ne laisse passer un "au hasard pour passer au mot suivant". */
+function looksLikeGuess(answer: string): boolean {
+  return !/\p{L}/u.test(answer);
 }
 
 /**
@@ -285,35 +302,54 @@ export async function checkAnswerTolerance(
   if (!mistralConfigured() || !answer.trim() || expected.length === 0) {
     return { verdict: "wrong" };
   }
+  if (looksLikeGuess(answer)) {
+    return { verdict: "wrong", mistakeKind: "oubli" };
+  }
   const sys =
     kind === "recall"
       ? "Tu corriges un exercice de russe. On te donne la ou les formes russes attendues et la " +
         "réponse tapée par l'apprenant. Réponds \"exact\" si sa réponse est UNIQUEMENT une " +
         "faute de frappe mineure (lettre manquante, en trop, inversée, ou de clavier) d'une des " +
-        "formes attendues. Réponds \"wrong\" pour toute autre forme grammaticale (mauvais cas, " +
-        "mauvais nombre, mauvaise personne) ou un autre mot : c'est justement ce que " +
-        "l'exercice teste. N'utilise pas \"close\" ici. En cas de doute, \"wrong\". Réponds " +
-        "UNIQUEMENT en JSON."
+        "formes attendues, ÉCRITE EN RUSSE (alphabet cyrillique). Une réponse en alphabet " +
+        "latin, une translittération phonétique du russe, ou toute chaîne qui n'est pas la " +
+        "forme russe elle-même n'est JAMAIS \"exact\" — c'est \"wrong\". Réponds \"wrong\" pour " +
+        "toute autre forme grammaticale (mauvais cas, mauvais nombre, mauvaise personne) ou un " +
+        "autre mot : c'est justement ce que l'exercice teste. N'utilise pas \"close\" ici. En " +
+        "cas de doute, \"wrong\". Pour un \"wrong\", classe aussi mistakeKind : \"autre-mot\" " +
+        "(mot russe différent, sans lien), \"autre-forme\" (bonne racine/mot mais mauvaise case, " +
+        "personne, temps ou nature), ou \"oubli\" (réponse qui n'a rien à voir, au hasard). " +
+        "Réponds UNIQUEMENT en JSON."
       : "Tu corriges un exercice de traduction russe → français. On te donne la ou les " +
-        "traductions attendues et la réponse de l'apprenant. Trois verdicts :\n" +
+        "traductions attendues et la réponse de l'apprenant. Méfie-toi : l'apprenant tape " +
+        "parfois n'importe quoi pour passer au mot suivant sans savoir — de la ponctuation, des " +
+        "lettres au hasard, ou la RETRANSCRIPTION PHONÉTIQUE DU MOT RUSSE LUI-MÊME en alphabet " +
+        "latin (ex. « iskat » pour « искать ») : ce n'est JAMAIS \"exact\" ni \"close\", " +
+        "toujours \"wrong\" — ce n'est pas du français, encore moins une traduction. Trois " +
+        "verdicts :\n" +
         "- \"exact\" : même sens (synonyme valide, reformulation équivalente, faute " +
-        "d'orthographe ou d'accent mineure). N'invente JAMAIS d'équivalence : si tu ne peux " +
-        "pas justifier que les deux mots sont réellement synonymes en français courant, ce " +
-        "n'est pas \"exact\".\n" +
-        "- \"close\" : l'apprenant a visiblement compris l'idée mais le mot n'est pas le bon " +
-        "équivalent — nature grammaticale différente (adjectif au lieu d'une préposition), " +
-        "terme trop vague, registre ou nuance à côté. Ex. « proche » pour « près de / auprès " +
-        "de » : l'idée est là, le mot n'est pas la bonne préposition.\n" +
-        "- \"wrong\" : sens différent ou hors sujet.\n" +
+        "d'orthographe ou d'accent mineure) — un VRAI mot français. N'invente JAMAIS " +
+        "d'équivalence : si tu ne peux pas justifier que les deux mots sont réellement " +
+        "synonymes en français courant, ce n'est pas \"exact\".\n" +
+        "- \"close\" : l'apprenant a visiblement compris l'idée et propose un VRAI mot français " +
+        "de sens voisin mais qui n'est pas le bon équivalent — nature grammaticale différente " +
+        "(adjectif au lieu d'une préposition), terme trop vague, registre ou nuance à côté. Ex. " +
+        "« proche » pour « près de / auprès de » : l'idée est là, le mot n'est pas la bonne " +
+        "préposition.\n" +
+        "- \"wrong\" : sens différent, hors sujet, ou pas un mot français reconnaissable.\n" +
+        "Pour un \"wrong\", classe aussi mistakeKind : \"autre-mot\" (mot français sans lien de " +
+        "sens avec l'attendu), \"autre-forme\" (même famille de sens/racine russe mais mauvaise " +
+        "nature grammaticale, ex. un verbe traduit à la place d'un adjectif de la même racine), " +
+        "ou \"oubli\" (réponse qui n'a manifestement rien à voir : au hasard, translittération " +
+        "du russe, charabia).\n" +
         "Réponds UNIQUEMENT en JSON.";
   const user = [
     `Attendu : ${expected.join(" / ")}`,
     `Réponse de l'apprenant : ${answer}`,
-    `JSON : { "verdict": "exact" | "close" | "wrong", "reason": string très courte en français (max 12 mots), utile surtout pour "close" }`,
+    `JSON : { "verdict": "exact" | "close" | "wrong", "reason": string très courte en français (max 12 mots), "mistakeKind": "autre-mot" | "autre-forme" | "oubli" (uniquement si verdict "wrong") }`,
   ].join("\n");
 
   try {
-    const raw = await chatJson<{ verdict?: unknown; reason?: unknown }>(
+    const raw = await chatJson<{ verdict?: unknown; reason?: unknown; mistakeKind?: unknown }>(
       [
         { role: "system", content: sys },
         { role: "user", content: user },
@@ -323,7 +359,12 @@ export async function checkAnswerTolerance(
     const v = String(raw.verdict ?? "").toLowerCase();
     const verdict: ToleranceVerdict =
       v === "exact" ? "exact" : v === "close" && kind === "translate" ? "close" : "wrong";
-    return { verdict, reason: raw.reason ? String(raw.reason) : undefined };
+    const mk = String(raw.mistakeKind ?? "");
+    const mistakeKind: MistakeKind | undefined =
+      verdict === "wrong" && (mk === "autre-mot" || mk === "autre-forme" || mk === "oubli")
+        ? (mk as MistakeKind)
+        : undefined;
+    return { verdict, reason: raw.reason ? String(raw.reason) : undefined, mistakeKind };
   } catch {
     return { verdict: "wrong" };
   }

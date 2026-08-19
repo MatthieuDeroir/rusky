@@ -46,6 +46,7 @@ import {
   checkAnswerTolerance,
   repairFrenchGloss,
   type ToleranceKind,
+  type MistakeKind,
 } from "@/lib/mistral";
 import { translateRuToFr } from "@/lib/deepl";
 import { recordPassedTask } from "@/lib/torfl-store";
@@ -760,7 +761,8 @@ export interface PracticeResult {
   discovered: boolean; // true if this answer just added the word/form to the collection
   tolerated: boolean; // accepted despite not matching exactly (IA), i.e. typo
   close: boolean; // "oui mais" : l'idée y est, le terme n'est pas le bon → crédit partiel
-  note?: string; // courte explication de l'IA sur un "close"
+  note?: string; // courte explication de l'IA sur un "close" ou un rejet
+  mistakeKind?: MistakeKind; // genre du raté ("autre-mot" | "autre-forme" | "oubli"), si faux
   level: number; // niveau de compétence de la carte APRÈS cette réponse
   previousLevel: number; // niveau avant, pour afficher la progression / la rechute
   levelLabel: string;
@@ -856,6 +858,8 @@ async function writeReviewOutcome(
   close: boolean,
   priorState: SrsState,
   xpSource: "review" | "discover" | "translate",
+  mistakeKind?: MistakeKind,
+  note?: string,
 ): Promise<{ xp?: XpAward; level: number; previousLevel: number; levelLabel: string }> {
   const next = srsReview(priorState, correct ? (close ? "hard" : "good") : "again");
   const now = new Date();
@@ -866,7 +870,7 @@ async function writeReviewOutcome(
     create: { userId, entryId, formKey: reviewKey, ...next, dueAt, lastReviewedAt: now },
   });
   await prisma.quizAttempt.create({
-    data: { entryId, formKey: reviewKey, userAnswer: answer, correct, userId },
+    data: { entryId, formKey: reviewKey, userAnswer: answer, correct, userId, mistakeKind, note },
   });
   const xp = correct ? await addXp(userId, xpSource) : undefined;
   return {
@@ -981,7 +985,22 @@ export async function refinePracticeVerdictAction(
   const check = await checkAnswerTolerance(aiKind, expected, token.answer);
 
   if (check.verdict === "wrong") {
-    // Le rejet initial était fondé : rien à corriger en base, on renvoie juste l'explication.
+    // Le rejet initial était fondé : la programmation SM-2 déjà écrite (verdict "again") reste
+    // valable. On annote juste la tentative avec le genre de raté, pour que l'appli s'en
+    // souvienne (voir MistakeKind) — au lieu de rejouer l'écriture SM-2/XP pour rien.
+    await prisma.quizAttempt
+      .create({
+        data: {
+          entryId: token.entryId,
+          formKey: token.reviewKey,
+          userAnswer: token.answer,
+          correct: false,
+          userId,
+          mistakeKind: check.mistakeKind,
+          note: check.reason,
+        },
+      })
+      .catch(() => {});
     const already = srsReview(token.priorState, "again");
     return {
       correct: false,
@@ -990,6 +1009,7 @@ export async function refinePracticeVerdictAction(
       tolerated: false,
       close: false,
       note: check.reason,
+      mistakeKind: check.mistakeKind,
       level: levelOf(already),
       previousLevel: levelOf(token.priorState),
       levelLabel: levelLabel(levelOf(already)),
@@ -1479,6 +1499,19 @@ export async function refineVocabVerdictAction(token: VocabRefineToken): Promise
   const reviewKey = `vocab:${token.direction}`;
 
   if (check.verdict === "wrong") {
+    await prisma.quizAttempt
+      .create({
+        data: {
+          entryId: token.entryId,
+          formKey: reviewKey,
+          userAnswer: token.answer,
+          correct: false,
+          userId,
+          mistakeKind: check.mistakeKind,
+          note: check.reason,
+        },
+      })
+      .catch(() => {});
     const already = srsReview(token.priorState, "again");
     return {
       correct: false,
@@ -1487,6 +1520,7 @@ export async function refineVocabVerdictAction(token: VocabRefineToken): Promise
       tolerated: false,
       close: false,
       note: check.reason,
+      mistakeKind: check.mistakeKind,
       level: levelOf(already),
       previousLevel: levelOf(token.priorState),
       levelLabel: levelLabel(levelOf(already)),

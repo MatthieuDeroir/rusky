@@ -90,13 +90,16 @@ export function PracticeCard({
       setResult(r);
       setScore((s) => ({ right: s.right + (r.correct ? 1 : 0), total: s.total + 1 }));
       showXpToast(r.xp);
+      const label = displayAccent(question.accented);
       if (r.pending && r.refineToken) {
-        verify.enqueue(r.refineToken, displayAccent(question.accented), askedAnswer, (final) => {
+        verify.enqueue(r.refineToken, label, askedAnswer, (final) => {
           // On ne corrige l'affichage en place que si l'utilisateur regarde encore cette carte ;
-          // sinon le résultat définitif reste visible seulement dans la pile, en passant.
+          // sinon le résultat définitif reste visible seulement dans l'historique, en passant.
           if (questionGen.current === gen) setResult(final);
           if (final.correct) setScore((s) => ({ right: s.right + 1, total: s.total }));
         });
+      } else {
+        verify.record(label, askedAnswer, r);
       }
     });
   }
@@ -117,7 +120,7 @@ export function PracticeCard({
             Ajouter un mot
           </Button>
         </div>
-        <VerifyPile pile={verify.pile} />
+        <VerifyPile pile={verify.history} />
       </div>
     );
   }
@@ -126,7 +129,7 @@ export function PracticeCard({
     return (
       <>
         <p className="text-center text-sm text-foreground/50">Chargement…</p>
-        <VerifyPile pile={verify.pile} />
+        <VerifyPile pile={verify.history} />
       </>
     );
   }
@@ -308,7 +311,7 @@ export function PracticeCard({
       <p className="text-center text-xs text-foreground/40">
         Révisions espacées : les formes réussies reviennent de moins en moins souvent.
       </p>
-      <VerifyPile pile={verify.pile} />
+      <VerifyPile pile={verify.history} />
     </div>
   );
 }

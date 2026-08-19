@@ -2,86 +2,133 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { PracticeResult } from "@/app/actions";
+import type { MistakeKind } from "@/lib/mistral";
 import { showXpToast } from "@/lib/xp-toast";
 
-export interface PendingVerification {
+const MISTAKE_LABEL: Record<MistakeKind, string> = {
+  "autre-mot": "confusion avec un autre mot",
+  "autre-forme": "bonne racine, mauvaise forme",
+  oubli: "au hasard / oubli",
+};
+
+export interface HistoryEntry {
   id: string;
-  label: string; // ce qui était demandé, pour se repérer dans la pile
-  answer: string; // ce que l'utilisateur avait répondu
-  status: "checking" | "confirmed" | "corrected";
+  label: string; // le mot demandé, pour se repérer dans l'historique
+  answer: string; // ce que l'utilisateur a répondu
+  status: "checking" | "correct" | "close" | "wrong";
+  expected?: string[];
   note?: string;
+  mistakeKind?: MistakeKind;
 }
 
 /**
- * File d'attente des vérifications IA en arrière-plan (le "second avis" sur une réponse jugée
- * fausse au premier passage). Chaque réponse qui a besoin de l'IA est empilée ici dès l'envoi ;
- * l'utilisateur n'attend jamais ce résultat pour continuer — on l'affiche quand il arrive,
- * confirmé ou corrigé, puis on le retire de la pile après un court délai.
+ * Historique de session des réponses (Réviser / Traduire), affiché à côté de la carte : chaque
+ * réponse y apparaît immédiatement, y compris celles qui doivent encore attendre le second avis
+ * IA en arrière-plan (statut "checking" jusqu'à résolution) — l'utilisateur n'attend jamais ce
+ * résultat pour continuer, mais peut le retrouver ici, avec la traduction attendue et le genre
+ * de raté (confusion de mot, de forme, ou réponse au hasard).
  */
 export function useVerifyPile<Token>(refine: (token: Token) => Promise<PracticeResult>) {
-  const [pile, setPile] = useState<PendingVerification[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const nextId = useRef(0);
 
+  const statusOf = (r: PracticeResult): HistoryEntry["status"] =>
+    !r.correct ? "wrong" : r.close ? "close" : "correct";
+
+  /** Réponse déjà tranchée par le verdict rapide (pas besoin d'IA) — entre directement. */
+  const record = useCallback((label: string, answer: string, result: PracticeResult) => {
+    const id = `h${nextId.current++}`;
+    setHistory((h) => [
+      {
+        id,
+        label,
+        answer,
+        status: statusOf(result),
+        expected: result.expected,
+        note: result.note,
+        mistakeKind: result.mistakeKind,
+      },
+      ...h,
+    ]);
+  }, []);
+
+  /** Réponse dont le verdict définitif dépend d'un second avis IA en tâche de fond. */
   const enqueue = useCallback(
     (token: Token, label: string, answer: string, onResolved?: (result: PracticeResult) => void) => {
-      const id = `v${nextId.current++}`;
-      setPile((p) => [...p, { id, label, answer, status: "checking" }]);
+      const id = `h${nextId.current++}`;
+      setHistory((h) => [{ id, label, answer, status: "checking" }, ...h]);
       refine(token)
         .then((result) => {
-          setPile((p) =>
-            p.map((item) =>
+          setHistory((h) =>
+            h.map((item) =>
               item.id === id
-                ? { ...item, status: result.correct ? "corrected" : "confirmed", note: result.note }
+                ? {
+                    ...item,
+                    status: statusOf(result),
+                    expected: result.expected,
+                    note: result.note,
+                    mistakeKind: result.mistakeKind,
+                  }
                 : item,
             ),
           );
           if (result.correct) showXpToast(result.xp);
           onResolved?.(result);
-          const ttl = result.correct ? 4500 : 2600;
-          setTimeout(() => setPile((p) => p.filter((item) => item.id !== id)), ttl);
         })
         .catch(() => {
-          // Réseau/IA indisponible : on retire simplement l'entrée, le verdict rapide (faux)
-          // écrit par submitPracticeAction/submitVocabAction reste tel quel.
-          setPile((p) => p.filter((item) => item.id !== id));
+          // Réseau/IA indisponible : le verdict rapide (faux), déjà écrit par
+          // submitPracticeAction/submitVocabAction, reste tel quel.
+          setHistory((h) => h.map((item) => (item.id === id ? { ...item, status: "wrong" } : item)));
         });
     },
     [refine],
   );
 
-  return { pile, enqueue };
+  return { history, record, enqueue };
 }
 
-/** Petite pile flottante en bas de l'écran : une carte par vérification IA en cours ou qui
- * vient de se résoudre. Purement informatif, ne bloque jamais l'interaction. */
-export function VerifyPile({ pile }: { pile: PendingVerification[] }) {
+const STATUS_STYLE: Record<HistoryEntry["status"], string> = {
+  checking: "border-white/15 bg-white/[0.03] text-foreground/60",
+  correct: "border-emerald-400/30 bg-emerald-400/[0.06] text-emerald-200",
+  close: "border-amber-400/30 bg-amber-400/[0.06] text-amber-200",
+  wrong: "border-red-400/25 bg-red-400/[0.05] text-red-200/80",
+};
+
+/** Historique à gauche de la carte (bureau) : un mot par ligne, réponse donnée, statut, et la
+ * traduction/forme attendue. Masqué sur petit écran — pas la place, la carte prime. */
+export function VerifyPile({ pile }: { pile: HistoryEntry[] }) {
   if (pile.length === 0) return null;
   return (
-    <div className="pointer-events-none fixed bottom-24 left-1/2 z-40 flex w-full max-w-sm -translate-x-1/2 flex-col-reverse gap-1.5 px-4 sm:bottom-6">
+    <div className="hidden xl:block fixed left-4 top-24 z-30 w-64 max-h-[70vh] overflow-y-auto space-y-1.5 pr-1">
+      <p className="px-1 text-xs font-medium uppercase tracking-wide text-foreground/40">
+        Historique de session
+      </p>
       {pile.map((item) => (
         <div
           key={item.id}
-          className={`rounded-xl border px-3 py-2 text-xs shadow-lg backdrop-blur-md transition-colors ${
-            item.status === "checking"
-              ? "border-white/15 bg-black/50 text-foreground/60"
-              : item.status === "corrected"
-                ? "border-emerald-400/40 bg-emerald-950/60 text-emerald-200"
-                : "border-white/10 bg-black/50 text-foreground/45"
-          }`}
+          className={`rounded-lg border px-2.5 py-2 text-xs transition-colors ${STATUS_STYLE[item.status]}`}
         >
-          {item.status === "checking" && (
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-              Vérification IA de « {item.answer} »…
-            </span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium">{item.label}</span>
+            {item.status === "checking" && (
+              <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+            )}
+          </div>
+          <div className="mt-0.5 text-foreground/50">
+            « {item.answer || "…"} »
+            {item.status === "checking" && " — vérification IA…"}
+          </div>
+          {item.status !== "checking" && item.expected && item.expected.length > 0 && (
+            <div className="mt-0.5 text-foreground/40">→ {item.expected.join(" / ")}</div>
           )}
-          {item.status === "corrected" && (
-            <span>
-              Finalement accepté 👍 « {item.answer} »
-              {item.note ? <span className="block text-emerald-300/70">{item.note}</span> : null}
-            </span>
+          {item.mistakeKind && (
+            <div className="mt-0.5 text-[11px] italic text-foreground/35">
+              {MISTAKE_LABEL[item.mistakeKind]}
+            </div>
           )}
-          {item.status === "confirmed" && <span>Confirmé faux — {item.label}</span>}
+          {item.note && item.status !== "checking" && (
+            <div className="mt-0.5 text-[11px] text-foreground/40">{item.note}</div>
+          )}
         </div>
       ))}
     </div>

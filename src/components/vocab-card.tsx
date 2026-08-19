@@ -71,11 +71,14 @@ export function VocabCard() {
       setResult(r);
       setScore((s) => ({ right: s.right + (r.correct ? 1 : 0), total: s.total + 1 }));
       showXpToast(r.xp);
+      const label = displayAccent(card.accented);
       if (r.pending && r.refineToken) {
-        verify.enqueue(r.refineToken, displayAccent(card.accented), askedAnswer, (final) => {
+        verify.enqueue(r.refineToken, label, askedAnswer, (final) => {
           if (cardGen.current === gen) setResult(final);
           if (final.correct) setScore((s) => ({ right: s.right + 1, total: s.total }));
         });
+      } else {
+        verify.record(label, askedAnswer, r);
       }
     });
   }
@@ -123,7 +126,7 @@ export function VocabCard() {
             Ajouter un mot
           </Button>
         </div>
-        <VerifyPile pile={verify.pile} />
+        <VerifyPile pile={verify.history} />
       </div>
     );
   }
@@ -133,7 +136,7 @@ export function VocabCard() {
       <div className="space-y-4">
         {directionToggle}
         <p className="text-center text-sm text-foreground/50">Chargement…</p>
-        <VerifyPile pile={verify.pile} />
+        <VerifyPile pile={verify.history} />
       </div>
     );
   }
@@ -253,7 +256,7 @@ export function VocabCard() {
           </div>
         </form>
       </div>
-      <VerifyPile pile={verify.pile} />
+      <VerifyPile pile={verify.history} />
     </div>
   );
 }
