@@ -253,7 +253,21 @@ export async function getWordNeighbors(
     }
     return { prevId, nextId };
   }
-  const ids = (await getCollection(userId)).map((i) => i.id);
+  // Juste l'ordre des mots suffit ici — pas besoin du détail complet (traductions, niveaux…)
+  // que renvoie getCollection, bien plus coûteux à calculer pour ce seul usage.
+  const encounters = await prisma.encounter.findMany({
+    where: { entryId: { not: null }, userId },
+    select: { entryId: true },
+    distinct: ["entryId"],
+  });
+  const entryIds = encounters.map((e) => e.entryId!);
+  const entries = entryIds.length
+    ? await prisma.dictionaryEntry.findMany({
+        where: { id: { in: entryIds } },
+        select: { id: true, bare: true },
+      })
+    : [];
+  const ids = entries.sort((a, b) => a.bare.localeCompare(b.bare, "ru")).map((e) => e.id);
   const idx = ids.indexOf(id);
   if (idx < 0) return { prevId: null, nextId: null };
   return {
@@ -299,14 +313,20 @@ export async function getCollection(userId: string): Promise<CollectionItem[]> {
     discoveredByEntry.set(e.entryId!, set);
   }
 
-  const entries = await prisma.dictionaryEntry.findMany({
-    where: { id: { in: entryIds } },
-  });
-  const formKeyRows = await prisma.dictionaryForm.findMany({
-    where: { entryId: { in: entryIds } },
-    select: { entryId: true, formKey: true },
-    distinct: ["entryId", "formKey"],
-  });
+  // Ces trois requêtes ne dépendent que d'entryIds, pas les unes des autres — en série ça
+  // payait 3 allers-retours Turso pour rien à chaque chargement de la Collection.
+  const [entries, formKeyRows, reviews] = await Promise.all([
+    prisma.dictionaryEntry.findMany({ where: { id: { in: entryIds } } }),
+    prisma.dictionaryForm.findMany({
+      where: { entryId: { in: entryIds } },
+      select: { entryId: true, formKey: true },
+      distinct: ["entryId", "formKey"],
+    }),
+    prisma.formReview.findMany({
+      where: { userId, entryId: { in: entryIds }, formKey: { startsWith: "vocab:" } },
+      select: { entryId: true, repetitions: true, dueAt: true },
+    }),
+  ]);
   const totalByEntry = new Map<number, number>();
   for (const r of formKeyRows) {
     totalByEntry.set(r.entryId, (totalByEntry.get(r.entryId) ?? 0) + 1);
@@ -324,10 +344,6 @@ export async function getCollection(userId: string): Promise<CollectionItem[]> {
   // l'infinitif d'un verbe) ressort "niveau plein" alors que le reste du paradigme est vierge.
   // Diviser par `total` (taille réelle du paradigme, déjà calculé ci-dessus) donnerait la bonne
   // moyenne.
-  const reviews = await prisma.formReview.findMany({
-    where: { userId, entryId: { in: entryIds }, formKey: { startsWith: "vocab:" } },
-    select: { entryId: true, repetitions: true, dueAt: true },
-  });
   const now = new Date();
   const baseByEntry = new Map<number, { level: number; cards: number; due: boolean }>();
   for (const r of reviews) {
@@ -434,13 +450,15 @@ export interface WordDetail {
 }
 
 export async function getWordDetail(id: number, userId: string): Promise<WordDetail | null> {
-  const entry = await prisma.dictionaryEntry.findUnique({ where: { id } });
+  // Aucune des trois ne dépend des autres — sur un mot existant (l'immense majorité des vues),
+  // les lancer en série payait 3 allers-retours Turso pour rien.
+  const [entry, forms, encounters] = await Promise.all([
+    prisma.dictionaryEntry.findUnique({ where: { id } }),
+    prisma.dictionaryForm.findMany({ where: { entryId: id }, orderBy: { variantIndex: "asc" } }),
+    prisma.encounter.findMany({ where: { entryId: id, userId }, orderBy: { createdAt: "desc" } }),
+  ]);
   if (!entry) return null;
 
-  const forms = await prisma.dictionaryForm.findMany({
-    where: { entryId: id },
-    orderBy: { variantIndex: "asc" },
-  });
   const variantsByKey = new Map<string, string[]>();
   for (const f of forms) {
     const arr = variantsByKey.get(f.formKey) ?? [];
@@ -448,10 +466,6 @@ export async function getWordDetail(id: number, userId: string): Promise<WordDet
     variantsByKey.set(f.formKey, arr);
   }
 
-  const encounters = await prisma.encounter.findMany({
-    where: { entryId: id, userId },
-    orderBy: { createdAt: "desc" },
-  });
   const discoveredKeys = new Set(
     encounters.map((e) => e.matchedFormKey).filter((k): k is string => !!k),
   );

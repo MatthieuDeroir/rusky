@@ -595,16 +595,18 @@ async function collectedContext(userId: string) {
     discoveredByEntry.set(e.entryId!, s);
   }
   const entryIds = [...new Set(encounters.map((e) => e.entryId!))];
-  const entries = entryIds.length
-    ? await prisma.dictionaryEntry.findMany({ where: { id: { in: entryIds } } })
-    : [];
-  const formVariants = entries.length
-    ? await prisma.dictionaryForm.findMany({
-        where: { entryId: { in: entries.map((e) => e.id) } },
-        orderBy: { variantIndex: "asc" },
-        select: { entryId: true, formKey: true, accented: true },
-      })
-    : [];
+  // formVariants ne dépend que d'entryIds (déjà connu), pas du résultat d'entries — les lancer
+  // en série payait un aller-retour Turso pour rien à chaque carte d'exercice chargée.
+  const [entries, formVariants] = entryIds.length
+    ? await Promise.all([
+        prisma.dictionaryEntry.findMany({ where: { id: { in: entryIds } } }),
+        prisma.dictionaryForm.findMany({
+          where: { entryId: { in: entryIds } },
+          orderBy: { variantIndex: "asc" },
+          select: { entryId: true, formKey: true, accented: true },
+        }),
+      ])
+    : [[], []];
   const formsByEntry = new Map<number, Map<string, string[]>>();
   for (const f of formVariants) {
     const m = formsByEntry.get(f.entryId) ?? new Map<string, string[]>();

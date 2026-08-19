@@ -20,10 +20,13 @@ export default async function WordPage({
   const { id } = await params;
   const { theme } = await searchParams;
   const userId = await currentUserId();
-  const word = await getWordDetail(Number(id), userId);
+  // getWordNeighbors ne dépend pas du résultat de getWordDetail — les lancer en série payait
+  // un aller-retour Turso pour rien à chaque ouverture d'un mot.
+  const [word, { prevId, nextId }] = await Promise.all([
+    getWordDetail(Number(id), userId),
+    getWordNeighbors(Number(id), userId, theme),
+  ]);
   if (!word) notFound();
-
-  const { prevId, nextId } = await getWordNeighbors(Number(id), userId, theme);
   const q = theme ? `?theme=${theme}` : "";
 
   const meta: string[] = [];
