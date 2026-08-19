@@ -4,6 +4,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import { transliterate } from "@/lib/translit";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 // The word (letters + soft/hard sign apostrophe) surrounding the caret, for transliteration.
 function wordAt(text: string, caret: number): { start: number; end: number; token: string } | null {
@@ -45,6 +46,7 @@ export function RussianInput({
   onBlur,
   readOnly,
   inputRef,
+  className,
   ...props
 }: RussianInputProps) {
   const internalRef = React.useRef<HTMLInputElement>(null);
@@ -117,11 +119,16 @@ export function RussianInput({
     });
 
   return (
-    <div className="relative">
+    // La classe passée par l'appelant (souvent du dimensionnement : flex-1, w-full, max-w-sm…)
+    // doit s'appliquer à CE wrapper, le vrai enfant flex/bloc dans la mise en page de
+    // l'appelant — pas seulement à l'<input> intérieur, qui ne compte pas pour ce calcul et se
+    // retrouvait donc écrasé à sa largeur minimale dès qu'un frère (bouton) partageait la ligne.
+    <div className={cn("relative", className)}>
       <Input
         ref={ref}
         value={value}
         readOnly={readOnly}
+        className={cn("w-full", className)}
         onChange={(e) => {
           onValueChange(e.target.value);
           if (!readOnly) refreshTranslit(e.target.value, e.target.selectionStart ?? e.target.value.length);
