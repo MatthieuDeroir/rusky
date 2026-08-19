@@ -26,6 +26,8 @@ export function AddWord() {
   const [groups, setGroups] = useState<DetectedWord[] | null>(null);
   const [isSearching, startSearch] = useTransition();
   const [isSaving, startSave] = useTransition();
+  // Ajout au cas par cas (une forme ambiguë à la fois) : id de la carte en cours d'ajout.
+  const [savingOne, setSavingOne] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -160,13 +162,58 @@ export function AddWord() {
     });
   }
 
+  // Une forme russe fléchie est souvent ambiguë (книги = génitif singulier / nominatif ou
+  // accusatif pluriel — parfois même sur plusieurs mots différents). Ajouter cette seule
+  // interprétation, sans toucher aux autres candidats affichés à côté.
+  function addOne(g: DetectedWord, m: DetectionMatch) {
+    const id = matchId(m);
+    if (savingOne) return;
+    setSavingOne(id);
+    startSave(async () => {
+      await addEncounterAction({
+        entryId: m.entryId,
+        rawInput: g.raw,
+        matchedFormKey: m.formKey,
+      });
+      setGroups((prev) =>
+        prev
+          ? prev.map((group) =>
+              group.norm !== g.norm
+                ? group
+                : {
+                    ...group,
+                    matches: group.matches.map((match) =>
+                      matchId(match) === id ? { ...match, alreadyAdded: true } : match,
+                    ),
+                  },
+            )
+          : prev,
+      );
+      toast.success(`« ${displayAccent(m.formAccented)} » ajouté.`, {
+        action: {
+          label: "Voir le tableau",
+          onClick: () => {
+            window.location.href = `/word/${m.entryId}`;
+          },
+        },
+      });
+      setSavingOne(null);
+    });
+  }
+
   // Add button / Enter: use current matches, or detect first if the debounce hasn't fired yet.
+  // Une forme fléchie ambiguë (plusieurs cases possibles) ne doit jamais s'ajouter en bloc sans
+  // que l'utilisateur ait choisi laquelle — Entrée se contente alors d'afficher les choix.
+  function isAmbiguous(src: DetectedWord[]) {
+    return src.some((g) => g.matches.length > 1);
+  }
+
   function submitAdd() {
     if (isSaving) return;
     const q = word.trim();
     if (!q) return;
     if (groups) {
-      if (addable.length > 0) save();
+      if (addable.length > 0 && !isAmbiguous(groups)) save();
       else if (noMatch && singleToken) saveUnmatched();
       return;
     }
@@ -175,7 +222,7 @@ export function AddWord() {
       const g = await detectSentenceAction(q);
       setGroups(g);
       const addableNow = g.flatMap((x) => x.matches).filter((m) => !m.alreadyAdded);
-      if (addableNow.length > 0) save(g);
+      if (addableNow.length > 0 && !isAmbiguous(g)) save(g);
     });
   }
 
@@ -279,9 +326,11 @@ export function AddWord() {
       {groups && allMatches.length > 0 && (
         <div className="space-y-4">
           <p className="text-sm text-foreground/60">
-            {groups.length === 1
-              ? "Interprétation(s) détectée(s) :"
-              : `${groups.length} mots détectés — toutes les formes nouvelles seront ajoutées :`}
+            {groups.some((g) => g.matches.length > 1)
+              ? "Plusieurs interprétations possibles — choisis la ou les bonnes formes :"
+              : groups.length === 1
+                ? "Interprétation détectée :"
+                : `${groups.length} mots détectés :`}
           </p>
 
           {groups.map((g) => (
@@ -300,7 +349,7 @@ export function AddWord() {
                 g.matches.map((m) => (
                   <div
                     key={matchId(m)}
-                    className={`glass flex items-center justify-between rounded-2xl px-5 py-4 ring-1 transition-colors ${
+                    className={`glass flex items-center justify-between gap-3 rounded-2xl px-5 py-4 ring-1 transition-colors ${
                       m.alreadyAdded
                         ? "bg-emerald-400/10 ring-emerald-400/40"
                         : m.lemmaCollected
@@ -334,6 +383,17 @@ export function AddWord() {
                         ) : null}
                       </div>
                     </div>
+                    {!m.alreadyAdded && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="shrink-0"
+                        onClick={() => addOne(g, m)}
+                        disabled={isSaving}
+                      >
+                        {savingOne === matchId(m) ? "…" : "Ajouter"}
+                      </Button>
+                    )}
                   </div>
                 ))
               )}
@@ -345,6 +405,7 @@ export function AddWord() {
               onClick={() => save()}
               disabled={isSaving || addable.length === 0}
               size="lg"
+              variant="secondary"
               className="w-full sm:ml-auto sm:w-auto"
             >
               {isSaving
@@ -352,7 +413,7 @@ export function AddWord() {
                 : addable.length === 0
                   ? "Déjà dans ta collection"
                   : addable.length > 1
-                    ? `Ajouter ${addable.length} formes`
+                    ? `Tout ajouter (${addable.length})`
                     : "Ajouter à ma collection"}
             </Button>
           </div>

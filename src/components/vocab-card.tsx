@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   getVocabCardAction,
   submitVocabAction,
+  refineVocabVerdictAction,
   type VocabCard as VocabCardData,
   type VocabDirection,
   type PracticeResult,
@@ -16,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { RussianInput } from "@/components/russian-keyboard";
 import { LevelPips } from "@/components/level-pips";
+import { useVerifyPile, VerifyPile } from "@/components/verify-pile";
 
 /** Vert = exact ; ambre = accepté avec réserve (faute de frappe ou « oui mais ») ; rouge = faux. */
 function ringClass(result: PracticeResult | null): string {
@@ -35,11 +37,14 @@ export function VocabCard() {
   const [isLoading, startLoad] = useTransition();
   const [isChecking, startCheck] = useTransition();
   const answerRef = useRef<HTMLInputElement>(null);
+  const verify = useVerifyPile(refineVocabVerdictAction);
+  const cardGen = useRef(0);
 
   const load = useCallback(
     (exclude?: string) => {
       startLoad(async () => {
         const c = await getVocabCardAction(direction, exclude);
+        cardGen.current += 1;
         setCard(c);
         setAnswer("");
         setResult(null);
@@ -55,15 +60,23 @@ export function VocabCard() {
 
   function check() {
     if (!card || card === "empty" || result || !answer.trim()) return;
+    const gen = cardGen.current;
+    const askedAnswer = answer.trim();
     startCheck(async () => {
       const r = await submitVocabAction({
         entryId: card.entryId,
         direction,
-        answer: answer.trim(),
+        answer: askedAnswer,
       });
       setResult(r);
       setScore((s) => ({ right: s.right + (r.correct ? 1 : 0), total: s.total + 1 }));
       showXpToast(r.xp);
+      if (r.pending && r.refineToken) {
+        verify.enqueue(r.refineToken, displayAccent(card.accented), askedAnswer, (final) => {
+          if (cardGen.current === gen) setResult(final);
+          if (final.correct) setScore((s) => ({ right: s.right + 1, total: s.total }));
+        });
+      }
     });
   }
 
@@ -110,6 +123,7 @@ export function VocabCard() {
             Ajouter un mot
           </Button>
         </div>
+        <VerifyPile pile={verify.pile} />
       </div>
     );
   }
@@ -119,6 +133,7 @@ export function VocabCard() {
       <div className="space-y-4">
         {directionToggle}
         <p className="text-center text-sm text-foreground/50">Chargement…</p>
+        <VerifyPile pile={verify.pile} />
       </div>
     );
   }
@@ -238,6 +253,7 @@ export function VocabCard() {
           </div>
         </form>
       </div>
+      <VerifyPile pile={verify.pile} />
     </div>
   );
 }

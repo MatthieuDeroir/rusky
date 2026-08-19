@@ -273,8 +273,8 @@ export interface CollectionItem {
   discovered: number;
   total: number;
   firstSeen: number; // epoch ms of the earliest encounter (date added)
-  level: number; // mastery 0..MAX_LEVEL, averaged over the word's SRS cards
-  cards: number; // how many SRS cards back that average (0 = never practised)
+  level: number; // mastery 0..MAX_LEVEL of the word's BASE FORM (Traduire vocab card)
+  cards: number; // how many vocab cards (0, 1 ru-fr, or 2 with fr-ru) back that level
   dueSoon: boolean; // at least one of its cards is due now
 }
 
@@ -312,25 +312,35 @@ export async function getCollection(userId: string): Promise<CollectionItem[]> {
     totalByEntry.set(r.entryId, (totalByEntry.get(r.entryId) ?? 0) + 1);
   }
 
-  // Mastery: average level across the word's SRS cards (forms + vocab), so a word only counts
-  // as mastered once its whole paradigm holds up, not just one lucky cell.
+  // Mastery (pour l'instant) : niveau de la forme de base, càd le meilleur des deux cartes
+  // Traduire (vocab:ru-fr / vocab:fr-ru) de ce mot — c'est la seule carte qui porte sur le mot
+  // dans son ensemble plutôt que sur une case fléchie précise, donc la plus lisible pour un
+  // débutant. `cards` compte combien de ces deux cartes existent (0 = jamais travaillé en
+  // Traduire), `dueSoon` si l'une d'elles est due.
+  //
+  // NB pour un futur "mode avancé" (moyenne sur tout le paradigme) : diviser par le nombre de
+  // cases PRATIQUÉES (FormReview existantes) est un piège — ça ignore les cases jamais
+  // rencontrées au lieu de les compter comme 0, donc un mot où une seule case a été vue (ex.
+  // l'infinitif d'un verbe) ressort "niveau plein" alors que le reste du paradigme est vierge.
+  // Diviser par `total` (taille réelle du paradigme, déjà calculé ci-dessus) donnerait la bonne
+  // moyenne.
   const reviews = await prisma.formReview.findMany({
-    where: { userId, entryId: { in: entryIds } },
+    where: { userId, entryId: { in: entryIds }, formKey: { startsWith: "vocab:" } },
     select: { entryId: true, repetitions: true, dueAt: true },
   });
   const now = new Date();
-  const srsByEntry = new Map<number, { sum: number; n: number; due: boolean }>();
+  const baseByEntry = new Map<number, { level: number; cards: number; due: boolean }>();
   for (const r of reviews) {
-    const g = srsByEntry.get(r.entryId) ?? { sum: 0, n: 0, due: false };
-    g.sum += Math.min(MAX_LEVEL, r.repetitions);
-    g.n += 1;
+    const g = baseByEntry.get(r.entryId) ?? { level: 0, cards: 0, due: false };
+    g.level = Math.max(g.level, Math.min(MAX_LEVEL, r.repetitions));
+    g.cards += 1;
     if (r.dueAt <= now) g.due = true;
-    srsByEntry.set(r.entryId, g);
+    baseByEntry.set(r.entryId, g);
   }
 
   return entries
     .map((e) => {
-      const srs = srsByEntry.get(e.id);
+      const base = baseByEntry.get(e.id);
       return {
         id: e.id,
         bare: e.bare,
@@ -342,9 +352,9 @@ export async function getCollection(userId: string): Promise<CollectionItem[]> {
         discovered: discoveredByEntry.get(e.id)?.size ?? 0,
         total: totalByEntry.get(e.id) ?? 0,
         firstSeen: firstSeenByEntry.get(e.id) ?? 0,
-        level: srs && srs.n > 0 ? Math.floor(srs.sum / srs.n) : 0,
-        cards: srs?.n ?? 0,
-        dueSoon: srs?.due ?? false,
+        level: base?.level ?? 0,
+        cards: base?.cards ?? 0,
+        dueSoon: base?.due ?? false,
       };
     })
     .sort((a, b) => a.bare.localeCompare(b.bare, "ru"));

@@ -31,6 +31,9 @@ model DictionaryEntry {
   // true = the FR gloss was filled/repaired by the AI against the (reliable) EN gloss, at
   // question time. Prevents re-checking the same entry on every card. See ensureFrenchGloss().
   frChecked      Boolean @default(false)
+  // true = DeepL has already been asked for a second FR candidate for this word (merged into
+  // translationsFr if new). Prevents re-querying DeepL on every card. See ensureFrenchGloss().
+  deeplChecked   Boolean @default(false)
   translationsEn String?
   translationsDe String?
 

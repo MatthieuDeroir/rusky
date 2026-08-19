@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { prisma } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
 import { addXp, setDailyGoal, type XpAward } from "@/lib/xp";
@@ -11,6 +12,7 @@ import {
   levelOf,
   levelLabel,
   MAX_LEVEL,
+  type SrsState,
 } from "@/lib/srs";
 import { backupDatabase } from "@/lib/backup";
 import { detectWord, type DetectionMatch } from "@/lib/detect";
@@ -45,6 +47,7 @@ import {
   repairFrenchGloss,
   type ToleranceKind,
 } from "@/lib/mistral";
+import { translateRuToFr } from "@/lib/deepl";
 import { recordPassedTask } from "@/lib/torfl-store";
 import { saveMcqKey, getMcqKey } from "@/lib/exam-items-store";
 
@@ -138,6 +141,7 @@ export async function fillCellAction(input: {
         userId,
       },
     });
+    scheduleFrenchEnrichment(input.entryId);
     xp = await addXp(userId, "complete");
     revalidatePath("/");
     revalidatePath(`/word/${input.entryId}`);
@@ -165,6 +169,7 @@ export async function addEncounterAction(data: AddEncounterInput) {
       userId,
     },
   });
+  scheduleFrenchEnrichment(data.entryId);
   const xp = await addXp(userId, "discover");
   revalidatePath("/");
   if (data.entryId) revalidatePath(`/word/${data.entryId}`);
@@ -674,25 +679,23 @@ export async function getPracticeCardAction(
   const { entries, formsByEntry, discoveredByEntry } = await collectedContext(userId);
   const entryMap = new Map(entries.map((e) => [e.id, e]));
 
-  // Optional mastery filter (coming from Collection): keep only words whose average card
-  // level matches, using the same computation as getCollection.
+  // Optional mastery filter (coming from Collection): keep only words whose base-form level
+  // matches — same computation as getCollection (le meilleur des cartes vocab:ru-fr/fr-ru).
   let levelOk: (entryId: number) => boolean = () => true;
   if (level !== undefined) {
     const reviews = await prisma.formReview.findMany({
-      where: { userId, entryId: { in: entries.map((e) => e.id) } },
+      where: {
+        userId,
+        entryId: { in: entries.map((e) => e.id) },
+        formKey: { startsWith: "vocab:" },
+      },
       select: { entryId: true, repetitions: true },
     });
-    const agg = new Map<number, { sum: number; n: number }>();
+    const agg = new Map<number, number>();
     for (const r of reviews) {
-      const g = agg.get(r.entryId) ?? { sum: 0, n: 0 };
-      g.sum += Math.min(MAX_LEVEL, r.repetitions);
-      g.n += 1;
-      agg.set(r.entryId, g);
+      agg.set(r.entryId, Math.max(agg.get(r.entryId) ?? 0, Math.min(MAX_LEVEL, r.repetitions)));
     }
-    levelOk = (entryId) => {
-      const g = agg.get(entryId);
-      return (g && g.n > 0 ? Math.floor(g.sum / g.n) : 0) === level;
-    };
+    levelOk = (entryId) => (agg.get(entryId) ?? 0) === level;
   }
 
   const passesTheme = (entryId: number) => {
@@ -761,6 +764,31 @@ export interface PracticeResult {
   level: number; // niveau de compétence de la carte APRÈS cette réponse
   previousLevel: number; // niveau avant, pour afficher la progression / la rechute
   levelLabel: string;
+  // true : le verdict déterministe (faux) est provisoire, l'IA le confirme/corrige en
+  // arrière-plan (voir refinePracticeVerdictAction / refineVocabVerdictAction) — le client
+  // n'attend pas cette confirmation pour passer à la carte suivante.
+  pending?: boolean;
+}
+
+/** Ce qu'il faut pour terminer en arrière-plan la vérification IA d'une réponse de Réviser,
+ * sans re-lire l'état SRS en base (on part de l'état AVANT cette tentative, capturé au moment
+ * du verdict rapide, pour reprogrammer correctement même si l'utilisateur a déjà enchaîné). */
+export interface PracticeRefineToken {
+  kind: PracticeKind;
+  entryId: number;
+  formKey: string | null;
+  reviewKey: string;
+  isNew: boolean;
+  answer: string;
+  priorState: SrsState;
+}
+
+/** Équivalent pour Traduire (vocab). */
+export interface VocabRefineToken {
+  entryId: number;
+  direction: VocabDirection;
+  answer: string;
+  priorState: SrsState;
 }
 
 export interface SubmitPracticeInput {
@@ -772,12 +800,11 @@ export interface SubmitPracticeInput {
   answer: string;
 }
 
-/** Grade any practice card (recall or translation) and reschedule it (SM-2). A correct answer
- * on an undiscovered cell also records the Encounter — practicing is now a normal way to grow
- * the collection, not just /add or the word page. */
-export async function submitPracticeAction(input: SubmitPracticeInput): Promise<PracticeResult> {
-  const userId = await currentUserId();
-
+/** Verdict déterministe (sans IA) pour une carte de Réviser : comparaison exacte contre les
+ * formes/traductions connues. Rapide (une seule requête), jamais bloqué sur le réseau. */
+async function gradePracticeDeterministic(
+  input: SubmitPracticeInput,
+): Promise<{ correct: boolean; expected: string[]; aiKind: ToleranceKind; worthAsking: boolean }> {
   let correct: boolean;
   let expected: string[];
   if (input.kind === "recall") {
@@ -809,37 +836,79 @@ export async function submitPracticeAction(input: SubmitPracticeInput): Promise<
       correct = !!e && normalizeBare(input.answer) === e.bare;
     }
   }
+  const aiKind: ToleranceKind = input.kind === "translate-ru-fr" ? "translate" : "recall";
+  const worthAsking =
+    !correct && input.answer.trim()
+      ? aiKind === "translate" || plausibleTypo(expected, input.answer)
+      : false;
+  return { correct, expected, aiKind, worthAsking };
+}
 
-  // Second opinion from the AI on a miss: tolerate typos (recall / fr→ru) or a close-enough
-  // synonym/paraphrase (ru→fr), so an approximation that isn't the point of the exercise
-  // doesn't feel like a wrong answer. Never runs on an already-correct answer, and any failure
-  // (unconfigured, network) just leaves the deterministic result untouched.
-  let tolerated = false;
-  let close = false;
-  let note: string | undefined;
-  if (!correct && input.answer.trim()) {
-    const aiKind: ToleranceKind = input.kind === "translate-ru-fr" ? "translate" : "recall";
-    const worthAsking = aiKind === "translate" || plausibleTypo(expected, input.answer);
-    if (worthAsking) {
-      const check = await checkAnswerTolerance(aiKind, expected, input.answer);
-      if (check.verdict === "exact") {
-        correct = true;
-        tolerated = true;
-      } else if (check.verdict === "close") {
-        correct = true;
-        close = true;
-        note = check.reason;
-      } else {
-        // Rejet : on garde quand même l'explication, c'est là qu'elle apprend le plus
-        // (« verbe au lieu d'adjectif », « mauvais cas »…).
-        note = check.reason;
+/** Écrit le résultat (SM-2 + historique + XP) d'une carte Réviser ou Traduire — partagé entre
+ * le verdict rapide et le raffinement IA en arrière-plan, qui rejoue cette même écriture avec
+ * un `correct`/`close` mis à jour une fois la vérification IA terminée. */
+async function writeReviewOutcome(
+  userId: string,
+  entryId: number,
+  reviewKey: string,
+  answer: string,
+  correct: boolean,
+  close: boolean,
+  priorState: SrsState,
+  xpSource: "review" | "discover" | "translate",
+): Promise<{ xp?: XpAward; level: number; previousLevel: number; levelLabel: string }> {
+  const next = srsReview(priorState, correct ? (close ? "hard" : "good") : "again");
+  const now = new Date();
+  const dueAt = nextDueDate(next, now);
+  await prisma.formReview.upsert({
+    where: { userId_entryId_formKey: { userId, entryId, formKey: reviewKey } },
+    update: { ...next, dueAt, lastReviewedAt: now },
+    create: { userId, entryId, formKey: reviewKey, ...next, dueAt, lastReviewedAt: now },
+  });
+  await prisma.quizAttempt.create({
+    data: { entryId, formKey: reviewKey, userAnswer: answer, correct, userId },
+  });
+  const xp = correct ? await addXp(userId, xpSource) : undefined;
+  return {
+    xp,
+    level: levelOf(next),
+    previousLevel: levelOf(priorState),
+    levelLabel: levelLabel(levelOf(next)),
+  };
+}
+
+/** Grade any practice card (recall or translation) and reschedule it (SM-2). A correct answer
+ * on an undiscovered cell also records the Encounter — practicing is now a normal way to grow
+ * the collection, not just /add or the word page.
+ *
+ * Version "expérimentale" découplée : quand la réponse ne correspond à aucune forme/traduction
+ * connue mais mérite un second avis IA, on ne bloque PAS la vérification dessus. On écrit tout
+ * de suite le verdict déterministe (donc « faux » provisoire) et on renvoie `pending: true` +
+ * un `refineToken` : le client empile cette carte, avance immédiatement, et appelle
+ * `refinePracticeVerdictAction` en tâche de fond pour obtenir (et appliquer rétroactivement)
+ * le verdict IA quand il arrive — sans jamais faire attendre l'utilisateur sur le réseau. */
+export async function submitPracticeAction(
+  input: SubmitPracticeInput,
+): Promise<PracticeResult & { refineToken?: PracticeRefineToken }> {
+  const userId = await currentUserId();
+  const { correct, expected, worthAsking } = await gradePracticeDeterministic(input);
+
+  const existing = await prisma.formReview.findUnique({
+    where: {
+      userId_entryId_formKey: { userId, entryId: input.entryId, formKey: input.reviewKey },
+    },
+  });
+  const priorState: SrsState = existing
+    ? {
+        ease: existing.ease,
+        intervalDays: existing.intervalDays,
+        repetitions: existing.repetitions,
+        lapses: existing.lapses,
       }
-    }
-  }
+    : INITIAL_STATE;
 
-  // Un "à peu près" ne fait pas découvrir une case : la forme exacte n'a pas été produite.
   let discovered = false;
-  if (correct && !close && input.isNew && input.formKey) {
+  if (correct && input.isNew && input.formKey) {
     await prisma.encounter.create({
       data: {
         entryId: input.entryId,
@@ -849,65 +918,130 @@ export async function submitPracticeAction(input: SubmitPracticeInput): Promise<
         userId,
       },
     });
+    scheduleFrenchEnrichment(input.entryId);
     discovered = true;
     revalidatePath(`/word/${input.entryId}`);
   }
 
-  const existing = await prisma.formReview.findUnique({
-    where: {
-      userId_entryId_formKey: { userId, entryId: input.entryId, formKey: input.reviewKey },
-    },
-  });
-  const state = existing
-    ? {
-        ease: existing.ease,
-        intervalDays: existing.intervalDays,
-        repetitions: existing.repetitions,
-        lapses: existing.lapses,
-      }
-    : INITIAL_STATE;
-  const next = srsReview(state, correct ? (close ? "hard" : "good") : "again");
-  const now = new Date();
-  const dueAt = nextDueDate(next, now);
-  await prisma.formReview.upsert({
-    where: {
-      userId_entryId_formKey: { userId, entryId: input.entryId, formKey: input.reviewKey },
-    },
-    update: { ...next, dueAt, lastReviewedAt: now },
-    create: {
-      userId,
-      entryId: input.entryId,
-      formKey: input.reviewKey,
-      ...next,
-      dueAt,
-      lastReviewedAt: now,
-    },
-  });
-
-  await prisma.quizAttempt.create({
-    data: {
-      entryId: input.entryId,
-      formKey: input.reviewKey,
-      userAnswer: input.answer,
-      correct,
-      userId,
-    },
-  });
-
   const xpSource = input.kind === "recall" ? (discovered ? "discover" : "review") : "translate";
-  const xp = correct ? await addXp(userId, xpSource) : undefined;
+  const outcome = await writeReviewOutcome(
+    userId,
+    input.entryId,
+    input.reviewKey,
+    input.answer,
+    correct,
+    false,
+    priorState,
+    xpSource,
+  );
   if (discovered) revalidatePath("/");
+
+  const pending = !correct && !!input.answer.trim() && worthAsking;
   return {
     correct,
     expected,
-    xp,
+    xp: outcome.xp,
+    discovered,
+    tolerated: false,
+    close: false,
+    level: outcome.level,
+    previousLevel: outcome.previousLevel,
+    levelLabel: outcome.levelLabel,
+    pending,
+    refineToken: pending
+      ? {
+          kind: input.kind,
+          entryId: input.entryId,
+          formKey: input.formKey,
+          reviewKey: input.reviewKey,
+          isNew: input.isNew,
+          answer: input.answer,
+          priorState,
+        }
+      : undefined,
+  };
+}
+
+/** Termine en arrière-plan la vérification qu'un `pending: true` de submitPracticeAction a
+ * laissée en suspens : demande le second avis IA, et si le verdict change (typo tolérée ou
+ * "oui mais"), corrige rétroactivement la programmation SM-2, l'historique et l'XP déjà écrits
+ * (à partir de `priorState`, l'état d'AVANT cette tentative, pas de l'état "faux" déjà en base). */
+export async function refinePracticeVerdictAction(
+  token: PracticeRefineToken,
+): Promise<PracticeResult> {
+  const userId = await currentUserId();
+  const { expected, aiKind } = await gradePracticeDeterministic({
+    kind: token.kind,
+    entryId: token.entryId,
+    formKey: token.formKey,
+    reviewKey: token.reviewKey,
+    isNew: token.isNew,
+    answer: token.answer,
+  });
+  const check = await checkAnswerTolerance(aiKind, expected, token.answer);
+
+  if (check.verdict === "wrong") {
+    // Le rejet initial était fondé : rien à corriger en base, on renvoie juste l'explication.
+    const already = srsReview(token.priorState, "again");
+    return {
+      correct: false,
+      expected,
+      discovered: false,
+      tolerated: false,
+      close: false,
+      note: check.reason,
+      level: levelOf(already),
+      previousLevel: levelOf(token.priorState),
+      levelLabel: levelLabel(levelOf(already)),
+      pending: false,
+    };
+  }
+
+  const tolerated = check.verdict === "exact";
+  const close = check.verdict === "close";
+
+  // Un "à peu près" ne fait pas découvrir une case : la forme exacte n'a pas été produite.
+  let discovered = false;
+  if (!close && token.isNew && token.formKey) {
+    await prisma.encounter.create({
+      data: {
+        entryId: token.entryId,
+        rawInput: token.answer.trim(),
+        matchedFormKey: token.formKey,
+        source: "réviser",
+        userId,
+      },
+    });
+    scheduleFrenchEnrichment(token.entryId);
+    discovered = true;
+    revalidatePath(`/word/${token.entryId}`);
+  }
+
+  const xpSource = token.kind === "recall" ? (discovered ? "discover" : "review") : "translate";
+  const outcome = await writeReviewOutcome(
+    userId,
+    token.entryId,
+    token.reviewKey,
+    token.answer,
+    true,
+    close,
+    token.priorState,
+    xpSource,
+  );
+  if (discovered) revalidatePath("/");
+
+  return {
+    correct: true,
+    expected,
+    xp: outcome.xp,
     discovered,
     tolerated,
     close,
-    note,
-    level: levelOf(next),
-    previousLevel: levelOf(state),
-    levelLabel: levelLabel(levelOf(next)),
+    note: check.reason,
+    level: outcome.level,
+    previousLevel: outcome.previousLevel,
+    levelLabel: outcome.levelLabel,
+    pending: false,
   };
 }
 
@@ -1073,38 +1207,83 @@ export async function revealFailureDrillAction(input: {
 
 type EntryLike = {
   id: number;
+  bare: string;
   accented: string;
   type: string;
   translationsFr: string | null;
   translationsEn: string | null;
   frManual: boolean;
   frChecked: boolean;
+  deeplChecked: boolean;
 };
 
+/** Longueur au-delà de laquelle un résultat DeepL sent pour une seule glose de dictionnaire est
+ * suspect (DeepL a traduit une phrase entière, pas juste le mot) — on l'ignore plutôt que de
+ * polluer les réponses acceptées avec du texte hors sujet. */
+const DEEPL_GLOSS_MAX_LEN = 40;
+
 /**
- * Ensure an entry's French gloss has been vetted against the English one. Returns the gloss to
- * use (possibly repaired). Never throws — on any failure the current value is kept.
+ * Ensure an entry's French gloss has been vetted against the English one (Mistral, une fois par
+ * entrée) ET enrichi d'une seconde source bon marché (DeepL, une fois par entrée) : plutôt qu'un
+ * appel IA à chaque réponse pour juger si une traduction est acceptable, on élargit une bonne
+ * fois pour toutes l'ensemble des réponses reconnues comme correctes, en cache. Le grading en
+ * direct (submitVocabAction / submitPracticeAction) reste alors une simple comparaison
+ * déterministe la plupart du temps. Jamais bloquant : toute panne (réseau, clé absente) laisse
+ * la valeur courante inchangée.
  */
 async function ensureFrenchGloss(entry: EntryLike): Promise<string | null> {
-  if (entry.frManual || entry.frChecked) return entry.translationsFr;
+  let fr = entry.translationsFr;
+  const patch: { translationsFr?: string | null; frChecked?: boolean; deeplChecked?: boolean } =
+    {};
 
-  const fix = await repairFrenchGloss({
-    accented: entry.accented,
-    type: entry.type,
-    en: entry.translationsEn,
-    fr: entry.translationsFr,
+  if (!entry.frManual && !entry.frChecked) {
+    const fix = await repairFrenchGloss({
+      accented: entry.accented,
+      type: entry.type,
+      en: entry.translationsEn,
+      fr,
+    });
+    if (fix.changed) fr = fix.fr ?? fr;
+    patch.frChecked = true;
+    if (fix.changed) patch.translationsFr = fr;
+  }
+
+  if (!entry.frManual && !entry.deeplChecked) {
+    const extra = await translateRuToFr(entry.bare);
+    patch.deeplChecked = true;
+    if (extra && extra.length <= DEEPL_GLOSS_MAX_LEN) {
+      const existing = (fr ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const alreadyCovered = existing.some((e) => normalizeFr(e) === normalizeFr(extra));
+      if (!alreadyCovered) {
+        fr = existing.length > 0 ? `${fr}, ${extra}` : extra;
+        patch.translationsFr = fr;
+      }
+    }
+  }
+
+  if (Object.keys(patch).length > 0) {
+    await prisma.dictionaryEntry.update({ where: { id: entry.id }, data: patch }).catch(() => {});
+    if (patch.translationsFr !== undefined) revalidatePath(`/word/${entry.id}`);
+  }
+  return fr;
+}
+
+/** Appelé depuis chaque endroit qui crée une Encounter (donc découvre potentiellement un mot
+ * pour la première fois) : programme la vérification Mistral + DeepL pour APRÈS la réponse déjà
+ * envoyée (via `after`), donc sans jamais faire attendre l'utilisateur. Le but : au moment où ce
+ * mot apparaît en Traduire, sa traduction française est déjà vérifiée et élargie — plus aucun
+ * appel IA nécessaire en direct pendant l'exercice. Un no-op si l'entrée est déjà à jour. */
+function scheduleFrenchEnrichment(entryId: number | null) {
+  if (entryId === null) return;
+  after(async () => {
+    const entry = await prisma.dictionaryEntry.findUnique({ where: { id: entryId } });
+    if (entry && !entry.frManual && (!entry.frChecked || !entry.deeplChecked)) {
+      await ensureFrenchGloss(entry);
+    }
   });
-
-  // Mark as checked even when unchanged, so we don't pay for the same call twice.
-  const nextFr = fix.fr ?? entry.translationsFr;
-  await prisma.dictionaryEntry
-    .update({
-      where: { id: entry.id },
-      data: { translationsFr: nextFr, frChecked: true },
-    })
-    .catch(() => {});
-  if (fix.changed) revalidatePath(`/word/${entry.id}`);
-  return nextFr;
 }
 
 // ---- Traduire : vocabulaire pur (forme du dictionnaire, sans décliner ni conjuguer) ----
@@ -1178,13 +1357,42 @@ export async function getVocabCardAction(
   };
 }
 
+type VocabEntry = EntryLike;
+
+/** Verdict déterministe (sans IA) pour une carte de Traduire. */
+async function gradeVocabDeterministic(
+  entry: VocabEntry,
+  direction: VocabDirection,
+  answer: string,
+): Promise<{ correct: boolean; expected: string[]; aiKind: ToleranceKind; worthAsking: boolean }> {
+  let correct: boolean;
+  let expected: string[];
+  if (direction === "ru-fr") {
+    // Same vetted gloss as the one shown on the card (no-op if already checked).
+    const fr = await ensureFrenchGloss(entry);
+    expected = (fr ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    correct = expected.map(normalizeFr).includes(normalizeFr(answer));
+  } else {
+    expected = [entry.accented];
+    correct = normalizeBare(answer) === entry.bare;
+  }
+  const aiKind: ToleranceKind = direction === "ru-fr" ? "translate" : "recall";
+  const worthAsking = !correct && answer.trim() ? aiKind === "translate" || plausibleTypo(expected, answer) : false;
+  return { correct, expected, aiKind, worthAsking };
+}
+
 /** Grade a vocabulary card (lemma level) and schedule it under its own "vocab:<dir>" key.
- * Same lenient AI second opinion as Réviser. */
+ * Same lenient AI second opinion as Réviser, et le même découplage : quand l'IA doit trancher,
+ * on écrit le verdict déterministe tout de suite et on renvoie un `refineToken` pour que le
+ * client termine la vérification en tâche de fond (voir refineVocabVerdictAction). */
 export async function submitVocabAction(input: {
   entryId: number;
   direction: VocabDirection;
   answer: string;
-}): Promise<PracticeResult> {
+}): Promise<PracticeResult & { refineToken?: VocabRefineToken }> {
   const userId = await currentUserId();
   const entry = await prisma.dictionaryEntry.findUnique({ where: { id: input.entryId } });
   if (!entry) {
@@ -1200,49 +1408,17 @@ export async function submitVocabAction(input: {
     };
   }
 
-  let correct: boolean;
-  let expected: string[];
-  if (input.direction === "ru-fr") {
-    // Same vetted gloss as the one shown on the card (no-op if already checked).
-    const fr = await ensureFrenchGloss(entry);
-    expected = (fr ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    correct = expected.map(normalizeFr).includes(normalizeFr(input.answer));
-  } else {
-    expected = [entry.accented];
-    correct = normalizeBare(input.answer) === entry.bare;
-  }
-
-  let tolerated = false;
-  let close = false;
-  let note: string | undefined;
-  if (!correct && input.answer.trim()) {
-    const aiKind: ToleranceKind = input.direction === "ru-fr" ? "translate" : "recall";
-    const worthAsking = aiKind === "translate" || plausibleTypo(expected, input.answer);
-    if (worthAsking) {
-      const check = await checkAnswerTolerance(aiKind, expected, input.answer);
-      if (check.verdict === "exact") {
-        correct = true;
-        tolerated = true;
-      } else if (check.verdict === "close") {
-        correct = true;
-        close = true;
-        note = check.reason;
-      } else {
-        // Rejet : on garde quand même l'explication, c'est là qu'elle apprend le plus
-        // (« verbe au lieu d'adjectif », « mauvais cas »…).
-        note = check.reason;
-      }
-    }
-  }
+  const { correct, expected, worthAsking } = await gradeVocabDeterministic(
+    entry,
+    input.direction,
+    input.answer,
+  );
 
   const reviewKey = `vocab:${input.direction}`;
   const existing = await prisma.formReview.findUnique({
     where: { userId_entryId_formKey: { userId, entryId: input.entryId, formKey: reviewKey } },
   });
-  const state = existing
+  const priorState: SrsState = existing
     ? {
         ease: existing.ease,
         intervalDays: existing.intervalDays,
@@ -1250,43 +1426,99 @@ export async function submitVocabAction(input: {
         lapses: existing.lapses,
       }
     : INITIAL_STATE;
-  const next = srsReview(state, correct ? (close ? "hard" : "good") : "again");
-  const now = new Date();
-  const dueAt = nextDueDate(next, now);
-  await prisma.formReview.upsert({
-    where: { userId_entryId_formKey: { userId, entryId: input.entryId, formKey: reviewKey } },
-    update: { ...next, dueAt, lastReviewedAt: now },
-    create: {
-      userId,
-      entryId: input.entryId,
-      formKey: reviewKey,
-      ...next,
-      dueAt,
-      lastReviewedAt: now,
-    },
-  });
-  await prisma.quizAttempt.create({
-    data: {
-      entryId: input.entryId,
-      formKey: reviewKey,
-      userAnswer: input.answer,
-      correct,
-      userId,
-    },
-  });
 
-  const xp = correct ? await addXp(userId, "translate") : undefined;
+  const outcome = await writeReviewOutcome(
+    userId,
+    input.entryId,
+    reviewKey,
+    input.answer,
+    correct,
+    false,
+    priorState,
+    "translate",
+  );
+
+  const pending = !correct && !!input.answer.trim() && worthAsking;
   return {
     correct,
     expected,
-    xp,
+    xp: outcome.xp,
+    discovered: false,
+    tolerated: false,
+    close: false,
+    level: outcome.level,
+    previousLevel: outcome.previousLevel,
+    levelLabel: outcome.levelLabel,
+    pending,
+    refineToken: pending
+      ? { entryId: input.entryId, direction: input.direction, answer: input.answer, priorState }
+      : undefined,
+  };
+}
+
+/** Pendant de refinePracticeVerdictAction pour Traduire. */
+export async function refineVocabVerdictAction(token: VocabRefineToken): Promise<PracticeResult> {
+  const userId = await currentUserId();
+  const entry = await prisma.dictionaryEntry.findUnique({ where: { id: token.entryId } });
+  if (!entry) {
+    return {
+      correct: false,
+      expected: [],
+      discovered: false,
+      tolerated: false,
+      close: false,
+      level: 0,
+      previousLevel: 0,
+      levelLabel: levelLabel(0),
+      pending: false,
+    };
+  }
+
+  const { expected, aiKind } = await gradeVocabDeterministic(entry, token.direction, token.answer);
+  const check = await checkAnswerTolerance(aiKind, expected, token.answer);
+  const reviewKey = `vocab:${token.direction}`;
+
+  if (check.verdict === "wrong") {
+    const already = srsReview(token.priorState, "again");
+    return {
+      correct: false,
+      expected,
+      discovered: false,
+      tolerated: false,
+      close: false,
+      note: check.reason,
+      level: levelOf(already),
+      previousLevel: levelOf(token.priorState),
+      levelLabel: levelLabel(levelOf(already)),
+      pending: false,
+    };
+  }
+
+  const tolerated = check.verdict === "exact";
+  const close = check.verdict === "close";
+  const outcome = await writeReviewOutcome(
+    userId,
+    token.entryId,
+    reviewKey,
+    token.answer,
+    true,
+    close,
+    token.priorState,
+    "translate",
+  );
+
+  return {
+    correct: true,
+    expected,
+    xp: outcome.xp,
     discovered: false,
     tolerated,
     close,
-    note,
-    level: levelOf(next),
-    previousLevel: levelOf(state),
-    levelLabel: levelLabel(levelOf(next)),
+    note: check.reason,
+    level: outcome.level,
+    previousLevel: outcome.previousLevel,
+    levelLabel: outcome.levelLabel,
+    pending: false,
   };
 }
 

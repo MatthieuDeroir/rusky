@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   getPracticeCardAction,
   submitPracticeAction,
+  refinePracticeVerdictAction,
   type PracticeCard as PracticeCardData,
   type PracticeResult,
 } from "@/app/actions";
@@ -15,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { RussianInput } from "@/components/russian-keyboard";
 import { LevelPips } from "@/components/level-pips";
+import { useVerifyPile, VerifyPile } from "@/components/verify-pile";
 
 export interface ThemeOption {
   key: string;
@@ -46,11 +48,17 @@ export function PracticeCard({
   const [isLoading, startLoad] = useTransition();
   const [isChecking, startCheck] = useTransition();
   const answerRef = useRef<HTMLInputElement>(null);
+  // Un avis IA en cours ne doit jamais bloquer le passage à la carte suivante : on le laisse se
+  // résoudre en arrière-plan (pile visible en bas d'écran) et, si l'utilisateur est encore sur
+  // la même carte quand la réponse arrive, on corrige l'affichage en place.
+  const verify = useVerifyPile(refinePracticeVerdictAction);
+  const questionGen = useRef(0);
 
   const load = useCallback(
     (exclude?: string) => {
       startLoad(async () => {
         const q = await getPracticeCardAction(exclude, theme, level);
+        questionGen.current += 1;
         setQuestion(q);
         setAnswer("");
         setResult(null);
@@ -68,6 +76,8 @@ export function PracticeCard({
 
   function check() {
     if (!question || question === "empty" || result || !answer.trim()) return;
+    const gen = questionGen.current;
+    const askedAnswer = answer.trim();
     startCheck(async () => {
       const r = await submitPracticeAction({
         kind: question.kind,
@@ -75,11 +85,19 @@ export function PracticeCard({
         formKey: question.formKey,
         reviewKey: question.reviewKey,
         isNew: question.isNew,
-        answer: answer.trim(),
+        answer: askedAnswer,
       });
       setResult(r);
       setScore((s) => ({ right: s.right + (r.correct ? 1 : 0), total: s.total + 1 }));
       showXpToast(r.xp);
+      if (r.pending && r.refineToken) {
+        verify.enqueue(r.refineToken, displayAccent(question.accented), askedAnswer, (final) => {
+          // On ne corrige l'affichage en place que si l'utilisateur regarde encore cette carte ;
+          // sinon le résultat définitif reste visible seulement dans la pile, en passant.
+          if (questionGen.current === gen) setResult(final);
+          if (final.correct) setScore((s) => ({ right: s.right + 1, total: s.total }));
+        });
+      }
     });
   }
 
@@ -99,12 +117,18 @@ export function PracticeCard({
             Ajouter un mot
           </Button>
         </div>
+        <VerifyPile pile={verify.pile} />
       </div>
     );
   }
 
   if (!question) {
-    return <p className="text-center text-sm text-foreground/50">Chargement…</p>;
+    return (
+      <>
+        <p className="text-center text-sm text-foreground/50">Chargement…</p>
+        <VerifyPile pile={verify.pile} />
+      </>
+    );
   }
 
   const isTranslateFr = question.kind === "translate-ru-fr";
@@ -284,6 +308,7 @@ export function PracticeCard({
       <p className="text-center text-xs text-foreground/40">
         Révisions espacées : les formes réussies reviennent de moins en moins souvent.
       </p>
+      <VerifyPile pile={verify.pile} />
     </div>
   );
 }
