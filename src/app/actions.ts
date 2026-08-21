@@ -1384,23 +1384,20 @@ export async function getVocabCardAction(
     if (entries.length === 0) return "empty";
   }
 
-  // Optional mastery filter (coming from Collection) : niveau de la forme de base, càd le
-  // meilleur des deux cartes vocab:ru-fr/fr-ru — même calcul que getCollection.
+  // Optional mastery filter (coming from Collection) : niveau de la carte Traduire russe →
+  // français — même calcul que getCollection.
   if (level !== undefined) {
     const vocabReviews = await prisma.formReview.findMany({
       where: {
         userId,
         entryId: { in: entries.map((e) => e.id) },
-        formKey: { startsWith: "vocab:" },
+        formKey: "vocab:ru-fr",
       },
       select: { entryId: true, repetitions: true },
     });
     const levelByEntry = new Map<number, number>();
     for (const r of vocabReviews) {
-      levelByEntry.set(
-        r.entryId,
-        Math.max(levelByEntry.get(r.entryId) ?? 0, Math.min(MAX_LEVEL, r.repetitions)),
-      );
+      levelByEntry.set(r.entryId, Math.min(MAX_LEVEL, r.repetitions));
     }
     entries = entries.filter((e) => (levelByEntry.get(e.id) ?? 0) === level);
     if (entries.length === 0) return "empty";

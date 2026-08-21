@@ -4,9 +4,11 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { fillCellAction } from "@/app/actions";
 import { displayAccent, normalizeBare, stripStress } from "@/lib/grammar";
 import type { ParadigmCellData, RenderedSection } from "@/lib/queries";
+import { levelLabel } from "@/lib/srs";
 import { Button } from "@/components/ui/button";
 import { RussianInput } from "@/components/russian-keyboard";
 import { SpeakButton } from "@/components/speak-button";
+import { LevelDot } from "@/components/level-dot";
 
 // When each Russian case is used — shown on hover over the case name.
 const CASE_USAGE: Record<string, string> = {
@@ -188,6 +190,17 @@ function Cell({
               : "bg-white/5 text-foreground/70"
           }`}
         >
+          {discovered && hasData && (
+            <LevelDot
+              level={cell.level}
+              title={
+                cell.level > 0
+                  ? `Niveau ${cell.level} · ${levelLabel(cell.level)}`
+                  : "Pas encore révisée en Réviser"
+              }
+              className="h-5"
+            />
+          )}
           <span>{hasData ? display : "—"}</span>
           {hasData && <SpeakButton text={cell.variants[0]} />}
         </div>

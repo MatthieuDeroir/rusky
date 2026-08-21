@@ -15,6 +15,7 @@ import {
 import type { CollectionItem } from "@/lib/queries";
 import { MAX_LEVEL, levelLabel } from "@/lib/srs";
 import { deleteWordAction } from "@/app/actions";
+import { LevelDot } from "@/components/level-dot";
 import { ProgressRing } from "@/components/progress-ring";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -232,7 +233,14 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
                   href={`/word/${it.id}`}
                   className="glass glass-lift flex items-center gap-2 rounded-xl py-2 pl-3 pr-2.5 hover:bg-white/10"
                 >
-                  <LevelDot level={it.level} cards={it.cards} dueSoon={it.dueSoon} />
+                  <LevelDot
+                    level={it.level}
+                    title={
+                      it.cards === 0
+                        ? "Jamais travaillé"
+                        : `Niveau ${it.level} · ${levelLabel(it.level)}${it.dueSoon ? " · à revoir maintenant" : ""}`
+                    }
+                  />
                   <span className="shrink-0 font-display text-lg leading-none">
                     {displayAccent(it.accented)}
                   </span>
@@ -288,46 +296,6 @@ export function CollectionView({ items }: { items: CollectionItem[] }) {
         onCancel={() => !isDeleting && setPending(null)}
       />
     </div>
-  );
-}
-
-// Mastery at a glance: a small bar whose fill and colour track the word's level (0 = never
-// practised / dropped back to zero, MAX_LEVEL = mastered).
-const LEVEL_COLOR = [
-  "bg-white/15", // 0 — à apprendre
-  "bg-red-400/70", // 1 — fragile
-  "bg-orange-400/70", // 2 — en cours
-  "bg-amber-400/80", // 3 — solide
-  "bg-lime-400/80", // 4 — ancré
-  "bg-emerald-400", // 5 — maîtrisé
-];
-
-function LevelDot({
-  level,
-  cards,
-  dueSoon,
-}: {
-  level: number;
-  cards: number;
-  dueSoon: boolean;
-}) {
-  const title =
-    cards === 0
-      ? "Jamais travaillé"
-      : `Niveau ${level} · ${levelLabel(level)}${dueSoon ? " · à revoir maintenant" : ""}`;
-  return (
-    <span
-      title={title}
-      aria-label={title}
-      className="flex h-6 w-1 shrink-0 flex-col-reverse gap-px overflow-hidden rounded-full bg-white/8"
-    >
-      {Array.from({ length: MAX_LEVEL }, (_, i) => (
-        <span
-          key={i}
-          className={`flex-1 ${i < level ? LEVEL_COLOR[level] : "bg-transparent"}`}
-        />
-      ))}
-    </span>
   );
 }
 

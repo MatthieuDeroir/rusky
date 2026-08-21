@@ -323,7 +323,7 @@ export async function getCollection(userId: string): Promise<CollectionItem[]> {
       distinct: ["entryId", "formKey"],
     }),
     prisma.formReview.findMany({
-      where: { userId, entryId: { in: entryIds }, formKey: { startsWith: "vocab:" } },
+      where: { userId, entryId: { in: entryIds }, formKey: "vocab:ru-fr" },
       select: { entryId: true, repetitions: true, dueAt: true },
     }),
   ]);
@@ -332,11 +332,10 @@ export async function getCollection(userId: string): Promise<CollectionItem[]> {
     totalByEntry.set(r.entryId, (totalByEntry.get(r.entryId) ?? 0) + 1);
   }
 
-  // Mastery (pour l'instant) : niveau de la forme de base, càd le meilleur des deux cartes
-  // Traduire (vocab:ru-fr / vocab:fr-ru) de ce mot — c'est la seule carte qui porte sur le mot
-  // dans son ensemble plutôt que sur une case fléchie précise, donc la plus lisible pour un
-  // débutant. `cards` compte combien de ces deux cartes existent (0 = jamais travaillé en
-  // Traduire), `dueSoon` si l'une d'elles est due.
+  // Mastery (pour l'instant) : niveau de la carte Traduire russe → français de ce mot — c'est
+  // le sens le plus utile pour un débutant (comprendre en lisant), et la seule carte qui porte
+  // sur le mot dans son ensemble plutôt que sur une case fléchie précise. `cards` vaut 0/1 selon
+  // que cette carte existe (jamais travaillée en Traduire, sinon), `dueSoon` si elle est due.
   //
   // NB pour un futur "mode avancé" (moyenne sur tout le paradigme) : diviser par le nombre de
   // cases PRATIQUÉES (FormReview existantes) est un piège — ça ignore les cases jamais
@@ -347,11 +346,11 @@ export async function getCollection(userId: string): Promise<CollectionItem[]> {
   const now = new Date();
   const baseByEntry = new Map<number, { level: number; cards: number; due: boolean }>();
   for (const r of reviews) {
-    const g = baseByEntry.get(r.entryId) ?? { level: 0, cards: 0, due: false };
-    g.level = Math.max(g.level, Math.min(MAX_LEVEL, r.repetitions));
-    g.cards += 1;
-    if (r.dueAt <= now) g.due = true;
-    baseByEntry.set(r.entryId, g);
+    baseByEntry.set(r.entryId, {
+      level: Math.min(MAX_LEVEL, r.repetitions),
+      cards: 1,
+      due: r.dueAt <= now,
+    });
   }
 
   return entries
@@ -381,6 +380,7 @@ export interface ParadigmCellData {
   label: string;
   variants: string[]; // accented forms (may be empty if reference has none)
   discovered: boolean;
+  level: number; // mastery 0..MAX_LEVEL of THIS cell specifically (recall reviews only)
 }
 export interface RenderedSection {
   title: string;
@@ -450,12 +450,16 @@ export interface WordDetail {
 }
 
 export async function getWordDetail(id: number, userId: string): Promise<WordDetail | null> {
-  // Aucune des trois ne dépend des autres — sur un mot existant (l'immense majorité des vues),
-  // les lancer en série payait 3 allers-retours Turso pour rien.
-  const [entry, forms, encounters] = await Promise.all([
+  // Aucune des quatre ne dépend des autres — sur un mot existant (l'immense majorité des vues),
+  // les lancer en série payait 4 allers-retours Turso pour rien.
+  const [entry, forms, encounters, reviews] = await Promise.all([
     prisma.dictionaryEntry.findUnique({ where: { id } }),
     prisma.dictionaryForm.findMany({ where: { entryId: id }, orderBy: { variantIndex: "asc" } }),
     prisma.encounter.findMany({ where: { entryId: id, userId }, orderBy: { createdAt: "desc" } }),
+    prisma.formReview.findMany({
+      where: { userId, entryId: id },
+      select: { formKey: true, repetitions: true },
+    }),
   ]);
   if (!entry) return null;
 
@@ -469,6 +473,14 @@ export async function getWordDetail(id: number, userId: string): Promise<WordDet
   const discoveredKeys = new Set(
     encounters.map((e) => e.matchedFormKey).filter((k): k is string => !!k),
   );
+
+  // Niveau PAR CASE : uniquement les révisions "recall" (formKey brut, sans ":") — les cartes
+  // vocab:/translate: portent sur le sens du mot, pas sur la production de cette forme précise.
+  const levelByFormKey = new Map<string, number>();
+  for (const r of reviews) {
+    if (r.formKey.includes(":")) continue;
+    levelByFormKey.set(r.formKey, Math.min(MAX_LEVEL, r.repetitions));
+  }
 
   const rules = rulesForEntry(entry, variantsByKey);
 
@@ -487,6 +499,7 @@ export async function getWordDetail(id: number, userId: string): Promise<WordDet
           label: r.label,
           variants,
           discovered: discoveredKeys.has(formKey),
+          level: levelByFormKey.get(formKey) ?? 0,
         };
       }),
     })),
