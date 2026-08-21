@@ -502,33 +502,29 @@ export interface TimelinePoint {
   words: number; // cumulé : mots distincts rencontrés pour la première fois
   forms: number; // cumulé : cases (mot, formKey) distinctes découvertes pour la première fois
   verbs: number; // cumulé : verbes distincts rencontrés pour la première fois
-  conjugations: number; // cumulé : cases de conjugaison au niveau maximal (approximatif, voir plus bas)
+  declensionDiscovered: number; // cumulé : cases de déclinaison découvertes (noms/adj/pronoms/numéraux)
+  conjugationDiscovered: number; // cumulé : cases de conjugaison découvertes (verbes)
   xp: number; // cumulé : XP total gagné
 }
 
 /**
- * Séries temporelles pour les graphiques de progression du profil. Le schéma ne garde pas
- * l'historique des niveaux de maîtrise (seul le niveau ACTUEL de chaque FormReview est stocké),
- * donc "conjugations" est une approximation : la date de dernière mise à jour d'une case de
- * conjugaison déjà au niveau max, pas la date exacte à laquelle elle l'a atteint. Les autres
- * séries (mots/formes/verbes/XP) sont exactes, dérivées de dates réellement enregistrées
- * (Encounter.createdAt, XpEvent.day).
+ * Séries temporelles pour les graphiques de progression du profil. Toutes exactes, dérivées de
+ * dates réellement enregistrées (Encounter.createdAt pour la découverte, XpEvent.day pour l'XP) —
+ * pas d'approximation sur un niveau de maîtrise (le schéma ne garde que le niveau ACTUEL de
+ * chaque FormReview, pas son historique, donc une série "maîtrisé au fil du temps" ne serait pas
+ * fiable ; la découverte, elle, a une date exacte et définitive).
  */
 export async function getProgressTimeline(userId: string): Promise<TimelinePoint[]> {
-  const [encounters, xpEvents, maxedRecall] = await Promise.all([
+  const [encounters, xpEvents] = await Promise.all([
     prisma.encounter.findMany({
       where: { userId, entryId: { not: null } },
       select: { entryId: true, matchedFormKey: true, createdAt: true },
     }),
     prisma.xpEvent.findMany({ where: { userId }, select: { day: true, amount: true } }),
-    prisma.formReview.findMany({
-      where: { userId, repetitions: { gte: MAX_LEVEL }, NOT: { formKey: { contains: ":" } } },
-      select: { entryId: true, lastReviewedAt: true, dueAt: true },
-    }),
   ]);
   if (encounters.length === 0 && xpEvents.length === 0) return [];
 
-  const entryIds = [...new Set([...encounters.map((e) => e.entryId!), ...maxedRecall.map((r) => r.entryId)])];
+  const entryIds = [...new Set(encounters.map((e) => e.entryId!))];
   const entries = await prisma.dictionaryEntry.findMany({
     where: { id: { in: entryIds } },
     select: { id: true, type: true },
@@ -552,17 +548,20 @@ export async function getProgressTimeline(userId: string): Promise<TimelinePoint
   const deltaWords = new Map<string, number>();
   const deltaForms = new Map<string, number>();
   const deltaVerbs = new Map<string, number>();
-  const deltaConj = new Map<string, number>();
+  const deltaDeclension = new Map<string, number>();
+  const deltaConjugation = new Map<string, number>();
   const deltaXp = new Map<string, number>();
 
   for (const [entryId, day] of firstWordDay) {
     bump(deltaWords, day);
     if (typeByEntry.get(entryId) === "verb") bump(deltaVerbs, day);
   }
-  for (const day of firstFormDay.values()) bump(deltaForms, day);
-  for (const r of maxedRecall) {
-    if (typeByEntry.get(r.entryId) !== "verb") continue;
-    bump(deltaConj, parisDay(r.lastReviewedAt ?? r.dueAt));
+  for (const [key, day] of firstFormDay) {
+    bump(deltaForms, day);
+    const entryId = Number(key.slice(0, key.indexOf("|")));
+    const type = typeByEntry.get(entryId);
+    if (type === "verb") bump(deltaConjugation, day);
+    else if (type && DECLINABLE_TYPES.includes(type)) bump(deltaDeclension, day);
   }
   for (const ev of xpEvents) bump(deltaXp, ev.day, ev.amount);
 
@@ -570,7 +569,8 @@ export async function getProgressTimeline(userId: string): Promise<TimelinePoint
     ...deltaWords.keys(),
     ...deltaForms.keys(),
     ...deltaVerbs.keys(),
-    ...deltaConj.keys(),
+    ...deltaDeclension.keys(),
+    ...deltaConjugation.keys(),
     ...deltaXp.keys(),
   ]);
   const sortedDays = [...allDays].sort();
@@ -578,16 +578,18 @@ export async function getProgressTimeline(userId: string): Promise<TimelinePoint
   let words = 0,
     forms = 0,
     verbs = 0,
-    conjugations = 0,
+    declensionDiscovered = 0,
+    conjugationDiscovered = 0,
     xp = 0;
   const points: TimelinePoint[] = [];
   for (const day of sortedDays) {
     words += deltaWords.get(day) ?? 0;
     forms += deltaForms.get(day) ?? 0;
     verbs += deltaVerbs.get(day) ?? 0;
-    conjugations += deltaConj.get(day) ?? 0;
+    declensionDiscovered += deltaDeclension.get(day) ?? 0;
+    conjugationDiscovered += deltaConjugation.get(day) ?? 0;
     xp += deltaXp.get(day) ?? 0;
-    points.push({ day, words, forms, verbs, conjugations, xp });
+    points.push({ day, words, forms, verbs, declensionDiscovered, conjugationDiscovered, xp });
   }
   return points;
 }

@@ -6,7 +6,7 @@ export const metadata = { title: "Travailler ses erreurs · Русский" };
 
 export default function ErreursPage() {
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="relative mx-auto max-w-2xl space-y-6">
       <BackButton />
       <div>
         <h1 className="text-2xl font-semibold">Travailler ses erreurs</h1>

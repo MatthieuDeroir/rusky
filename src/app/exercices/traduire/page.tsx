@@ -14,7 +14,7 @@ export default async function TraduirePage({
   const levelFilter = level !== undefined && /^\d+$/.test(level) ? Number(level) : undefined;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="relative mx-auto max-w-2xl space-y-6">
       <BackButton />
       <div>
         <h1 className="text-2xl font-semibold">Traduire</h1>

@@ -11,7 +11,7 @@ export default async function ReviserPage() {
   const themes = await getThemeOptions(userId);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="relative mx-auto max-w-2xl space-y-6">
       <BackButton />
       <div>
         <h1 className="text-2xl font-semibold">Réviser</h1>

@@ -1,6 +1,6 @@
 import type { TimelinePoint } from "@/lib/queries";
 
-type Metric = "words" | "forms" | "verbs" | "conjugations" | "xp";
+type Metric = "words" | "forms" | "verbs" | "declensionDiscovered" | "conjugationDiscovered" | "xp";
 
 function buildPath(values: number[], width: number, height: number, pad = 4) {
   const max = Math.max(1, ...values);

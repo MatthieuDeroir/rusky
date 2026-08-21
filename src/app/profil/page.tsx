@@ -69,7 +69,16 @@ export default async function ProfilPage() {
             <ProgressSparkline title="Mots connus" points={timeline} metric="words" />
             <ProgressSparkline title="Formes découvertes" points={timeline} metric="forms" />
             <ProgressSparkline title="Verbes connus" points={timeline} metric="verbs" />
-            <ProgressSparkline title="Conjugaisons maîtrisées" points={timeline} metric="conjugations" />
+            <ProgressSparkline
+              title="Déclinaison découverte"
+              points={timeline}
+              metric="declensionDiscovered"
+            />
+            <ProgressSparkline
+              title="Conjugaison découverte"
+              points={timeline}
+              metric="conjugationDiscovered"
+            />
             <ProgressSparkline
               title="Points de maîtrise (XP)"
               points={timeline}

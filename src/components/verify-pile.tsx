@@ -103,17 +103,16 @@ const STATUS_ACCENT: Record<HistoryEntry["status"], string> = {
 };
 
 /** Historique à gauche de la carte (bureau) : un mot par ligne, réponse donnée, statut, et la
- * traduction/forme attendue. Masqué tant que l'écran n'est pas assez large pour la loger sans
- * toucher la carte : la carte d'exercice fait max-w-2xl (42rem) centrée, donc son bord gauche est
- * à `50vw - 21rem` — on ne montre la pile (18rem de large) qu'à partir de la largeur où elle
- * tient avec une vraie marge des deux côtés, positionnée par rapport au CENTRE du viewport (pas
- * un `left` fixe) pour que la marge avec la carte reste constante quelle que soit la largeur. */
+ * traduction/forme attendue. `absolute` + `right-[calc(100%+…)]` l'ancre directement au bord
+ * gauche du conteneur de la PAGE (qui doit être `relative` — voir les pages `/exercices/*`) au
+ * lieu de deviner sa position depuis le centre du viewport : par construction elle ne peut plus
+ * jamais chevaucher la carte, quels que soient la largeur exacte, le padding ou le zoom texte.
+ * Masquée tant que l'écran n'est pas assez large pour la loger avec une vraie marge. */
 export function VerifyPile({ pile }: { pile: HistoryEntry[] }) {
   if (pile.length === 0) return null;
   return (
     <div
-      className="glass-strong fixed top-24 z-30 hidden max-h-[70vh] w-72 flex-col rounded-2xl min-[1360px]:flex"
-      style={{ left: "max(1rem, calc(50% - 40.5rem))" }}
+      className="glass-strong absolute top-0 right-[calc(100%+1.5rem)] z-30 hidden max-h-[70vh] w-72 flex-col rounded-2xl min-[1360px]:flex"
     >
       <p className="shrink-0 border-b border-white/8 px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground/40">
         Historique de session
