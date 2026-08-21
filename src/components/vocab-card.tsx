@@ -28,7 +28,14 @@ function ringClass(result: PracticeResult | null): string {
     : "ring-2 ring-emerald-400/60";
 }
 
-export function VocabCard({ level }: { level?: number }) {
+export function VocabCard({
+  level,
+  mistakesOnly,
+}: {
+  level?: number;
+  /** true = ne piocher que dans les mots dont la dernière tentative (ce sens) était fausse. */
+  mistakesOnly?: boolean;
+}) {
   const [direction, setDirection] = useState<VocabDirection>("ru-fr");
   const [card, setCard] = useState<VocabCardData | "empty" | null>(null);
   const [answer, setAnswer] = useState("");
@@ -43,7 +50,7 @@ export function VocabCard({ level }: { level?: number }) {
   const load = useCallback(
     (exclude?: string) => {
       startLoad(async () => {
-        const c = await getVocabCardAction(direction, exclude, level);
+        const c = await getVocabCardAction(direction, exclude, level, mistakesOnly);
         cardGen.current += 1;
         setCard(c);
         setAnswer("");
@@ -51,7 +58,7 @@ export function VocabCard({ level }: { level?: number }) {
         setTimeout(() => answerRef.current?.focus(), 0);
       });
     },
-    [direction, level],
+    [direction, level, mistakesOnly],
   );
 
   useEffect(() => {
@@ -118,13 +125,19 @@ export function VocabCard({ level }: { level?: number }) {
       <div className="space-y-4">
         {directionToggle}
         <div className="glass-strong rounded-3xl p-10 text-center">
-          <h2 className="text-xl font-semibold">Rien à traduire pour l’instant</h2>
+          <h2 className="text-xl font-semibold">
+            {mistakesOnly ? "Aucune erreur en attente 🎉" : "Rien à traduire pour l’instant"}
+          </h2>
           <p className="mt-2 text-foreground/65">
-            Ajoute des mots à ta collection (avec une traduction française) pour t’entraîner.
+            {mistakesOnly
+              ? "Tous tes derniers essais dans ce sens sont réussis — reviens ici après une session de Traduire."
+              : "Ajoute des mots à ta collection (avec une traduction française) pour t’entraîner."}
           </p>
-          <Button render={<Link href="/add" />} nativeButton={false} className="mt-6">
-            Ajouter un mot
-          </Button>
+          {!mistakesOnly && (
+            <Button render={<Link href="/add" />} nativeButton={false} className="mt-6">
+              Ajouter un mot
+            </Button>
+          )}
         </div>
         <VerifyPile pile={verify.history} />
       </div>

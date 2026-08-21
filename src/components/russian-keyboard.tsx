@@ -54,6 +54,11 @@ export function RussianInput({
   const [open, setOpen] = React.useState(false);
   const [translit, setTranslit] = React.useState<Translit | null>(null);
   const caret = React.useRef<number | null>(null);
+  // Tampon du latin tapé pour la conversion phonétique en direct : tant que l'utilisateur
+  // enchaîne des lettres latines à la suite (ex. "z" puis "h"), on retranslittère le mot ENTIER
+  // depuis ce tampon à chaque frappe — c'est ce qui permet à "zh" de redevenir "ж" au lieu de
+  // rester bloqué sur le "з" déjà affiché pour le "z" tapé juste avant.
+  const liveLatin = React.useRef<{ start: number; latin: string; shownLen: number } | null>(null);
 
   // Recompute Latin→Cyrillic suggestions for the word around the caret.
   function refreshTranslit(text: string, pos: number) {
@@ -72,6 +77,7 @@ export function RussianInput({
     const next = value.slice(0, translit.start) + cand + value.slice(translit.end);
     caret.current = translit.start + cand.length;
     setTranslit(null);
+    liveLatin.current = null; // choix manuel : ne pas laisser la frappe suivante le réécrire
     onValueChange(next);
     ref.current?.focus();
   }
@@ -102,6 +108,7 @@ export function RussianInput({
     const [next, pos] = producer(value, start, end);
     caret.current = pos;
     setTranslit(null); // inserted Cyrillic from the on-screen keyboard
+    liveLatin.current = null;
     onValueChange(next);
     el?.focus();
   }
@@ -130,8 +137,48 @@ export function RussianInput({
         readOnly={readOnly}
         className={cn("w-full", className)}
         onChange={(e) => {
-          onValueChange(e.target.value);
-          if (!readOnly) refreshTranslit(e.target.value, e.target.selectionStart ?? e.target.value.length);
+          const raw = e.target.value;
+          if (readOnly) {
+            onValueChange(raw);
+            return;
+          }
+
+          // Diff contre la valeur précédente pour isoler ce qui vient d'être tapé/supprimé, et
+          // décider si ça prolonge le tampon latin en cours (voir liveLatin plus haut).
+          const prev = value;
+          let p = 0;
+          const commonMax = Math.min(prev.length, raw.length);
+          while (p < commonMax && prev[p] === raw[p]) p++;
+          let endPrev = prev.length;
+          let endRaw = raw.length;
+          while (endPrev > p && endRaw > p && prev[endPrev - 1] === raw[endRaw - 1]) {
+            endPrev--;
+            endRaw--;
+          }
+          const removed = prev.slice(p, endPrev);
+          const inserted = raw.slice(p, endRaw);
+          const isLatinInsert = removed === "" && inserted.length > 0 && /^[a-z']+$/i.test(inserted);
+
+          if (isLatinInsert) {
+            const live = liveLatin.current;
+            const contiguous = !!live && p === live.start + live.shownLen;
+            const start = contiguous ? live!.start : p;
+            const latin = (contiguous ? live!.latin : "") + inserted.toLowerCase();
+            // Retranslittère le mot ENTIER (pas juste la lettre tapée) : c'est ce qui permet à
+            // "z" puis "h" de redevenir "ж" au lieu de rester sur "з" + un "h" égaré.
+            const cands = transliterate(latin);
+            const top = cands[0] ?? latin;
+            const next = raw.slice(0, start) + top + raw.slice(p + inserted.length);
+            liveLatin.current = { start, latin, shownLen: top.length };
+            caret.current = start + top.length;
+            setTranslit({ start, end: start + top.length, items: cands });
+            onValueChange(next);
+            return;
+          }
+
+          liveLatin.current = null;
+          onValueChange(raw);
+          refreshTranslit(raw, e.target.selectionStart ?? raw.length);
         }}
         onKeyUp={(e) => {
           // Track caret moves (arrows / click) so suggestions follow the edited word.
@@ -141,15 +188,11 @@ export function RussianInput({
           }
         }}
         onKeyDown={(e) => {
-          if (translit) {
-            if (e.key === "Enter") {
-              // Accept the best Cyrillic suggestion instead of submitting the form.
-              e.preventDefault();
-              chooseTranslit(translit.items[0]);
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              setTranslit(null);
-            }
+          // La conversion s'applique déjà en direct — Entrée n'a plus besoin d'être interceptée
+          // pour "valider" ; elle soumet normalement. Seul Échap referme la liste d'alternatives.
+          if (translit && e.key === "Escape") {
+            e.preventDefault();
+            setTranslit(null);
           }
         }}
         onFocus={(e) => {
@@ -175,7 +218,7 @@ export function RussianInput({
           onMouseDown={(e) => e.preventDefault()}
         >
           <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-foreground/40">
-            Cyrillique · Entrée pour valider
+            Déjà converti — clique pour une autre orthographe
           </div>
           {translit.items.map((c, idx) => (
             <button

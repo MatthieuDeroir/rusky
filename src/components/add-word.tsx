@@ -202,18 +202,16 @@ export function AddWord() {
   }
 
   // Add button / Enter: use current matches, or detect first if the debounce hasn't fired yet.
-  // Une forme fléchie ambiguë (plusieurs cases possibles) ne doit jamais s'ajouter en bloc sans
-  // que l'utilisateur ait choisi laquelle — Entrée se contente alors d'afficher les choix.
-  function isAmbiguous(src: DetectedWord[]) {
-    return src.some((g) => g.matches.length > 1);
-  }
-
+  // Entrée n'ajoute automatiquement QUE s'il n'y a qu'une seule proposition ajoutable au total —
+  // que l'ambiguïté vienne d'une forme à plusieurs interprétations OU de plusieurs mots détectés
+  // dans une phrase. Dès qu'il y a un choix à faire, Entrée n'ajoute rien : il faut cliquer sur
+  // la proposition voulue (ou sur « Tout ajouter »), jamais un ajout en bloc non voulu.
   function submitAdd() {
     if (isSaving) return;
     const q = word.trim();
     if (!q) return;
     if (groups) {
-      if (addable.length > 0 && !isAmbiguous(groups)) save();
+      if (addable.length === 1) save();
       else if (noMatch && singleToken) saveUnmatched();
       return;
     }
@@ -222,7 +220,7 @@ export function AddWord() {
       const g = await detectSentenceAction(q);
       setGroups(g);
       const addableNow = g.flatMap((x) => x.matches).filter((m) => !m.alreadyAdded);
-      if (addableNow.length > 0 && !isAmbiguous(g)) save(g);
+      if (addableNow.length === 1) save(g);
     });
   }
 

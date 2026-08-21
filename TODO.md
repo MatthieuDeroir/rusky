@@ -14,9 +14,9 @@ Idées et chantiers identifiés mais pas encore faits. Cocher/supprimer une fois
 
 ## Exercices
 
-- [ ] **Travailler ses erreurs** (`/exercices/erreurs`) ne couvre pour l'instant que les cartes
-      de Réviser (déclinaisons/conjugaisons + traductions intégrées) — pas encore les cartes
-      dédiées de Traduire (vocab:ru-fr/fr-ru), qui ont un autre format d'écran.
+- [x] **Travailler ses erreurs** (`/exercices/erreurs`) : choix Réviser / Traduire, chacun ne
+      piochant que dans les mots dont la dernière tentative a échoué. Pas encore d'autres types
+      (Cas, Chiffres…) dans ce sélecteur — à étendre si besoin.
 
 ## Dictionnaire (qualité des données)
 

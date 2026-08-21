@@ -1,5 +1,5 @@
 import { BackButton } from "@/components/back-button";
-import { PracticeCard } from "@/components/practice-card";
+import { ErreursExercise } from "@/components/erreurs-exercise";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Travailler ses erreurs · Русский" };
@@ -15,7 +15,7 @@ export default function ErreursPage() {
           reprennes correctement.
         </p>
       </div>
-      <PracticeCard themes={[]} mistakesOnly />
+      <ErreursExercise />
     </div>
   );
 }

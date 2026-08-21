@@ -1346,6 +1346,7 @@ export async function getVocabCardAction(
   direction: VocabDirection,
   exclude?: string,
   level?: number,
+  mistakesOnly?: boolean,
 ): Promise<VocabCard | "empty"> {
   const userId = await currentUserId();
   const enc = await prisma.encounter.findMany({
@@ -1365,6 +1366,23 @@ export async function getVocabCardAction(
     },
   });
   if (entries.length === 0) return "empty";
+
+  // "Travailler ses erreurs" côté Traduire : ne garder que les mots dont la DERNIÈRE tentative
+  // sur ce sens précis (vocab:<direction>) était fausse — une réussite plus récente les sort du
+  // lot, comme pour getMistakeCardAction côté Réviser.
+  if (mistakesOnly) {
+    const attempts = await prisma.quizAttempt.findMany({
+      where: { userId, formKey: `vocab:${direction}`, entryId: { in: entries.map((e) => e.id) } },
+      orderBy: { createdAt: "desc" },
+      select: { entryId: true, correct: true },
+    });
+    const latestByEntry = new Map<number, boolean>();
+    for (const a of attempts) {
+      if (a.entryId != null && !latestByEntry.has(a.entryId)) latestByEntry.set(a.entryId, a.correct);
+    }
+    entries = entries.filter((e) => latestByEntry.get(e.id) === false);
+    if (entries.length === 0) return "empty";
+  }
 
   // Optional mastery filter (coming from Collection) : niveau de la forme de base, càd le
   // meilleur des deux cartes vocab:ru-fr/fr-ru — même calcul que getCollection.
