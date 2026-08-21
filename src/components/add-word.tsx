@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Mic, Square } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -22,6 +23,7 @@ function matchId(m: DetectionMatch) {
 }
 
 export function AddWord() {
+  const router = useRouter();
   const [word, setWord] = useState("");
   const [groups, setGroups] = useState<DetectedWord[] | null>(null);
   const [isSearching, startSearch] = useTransition();
@@ -149,7 +151,7 @@ export function AddWord() {
               action: {
                 label: "Voir le tableau",
                 onClick: () => {
-                  window.location.href = `/word/${lastEntryId}`;
+                  router.push(`/word/${lastEntryId}`);
                 },
               },
             }
@@ -193,7 +195,7 @@ export function AddWord() {
         action: {
           label: "Voir le tableau",
           onClick: () => {
-            window.location.href = `/word/${m.entryId}`;
+            router.push(`/word/${m.entryId}`);
           },
         },
       });

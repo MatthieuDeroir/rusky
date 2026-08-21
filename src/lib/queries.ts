@@ -3,11 +3,15 @@ import { prisma } from "./db";
 import {
   buildSections,
   getLayout,
+  caseOf,
+  CASE_LABELS,
+  type CaseCode,
   type ParadigmSection,
   type WordType,
 } from "./grammar";
-import { caseTriggers } from "./cases";
+import { caseTriggers, CASE_ORDER } from "./cases";
 import { MAX_LEVEL } from "./srs";
+import { parisDay } from "./dates";
 import {
   adjClass,
   analyzeAdjective,
@@ -373,6 +377,219 @@ export async function getCollection(userId: string): Promise<CollectionItem[]> {
       };
     })
     .sort((a, b) => a.bare.localeCompare(b.bare, "ru"));
+}
+
+export interface MasteryStat {
+  avg: number; // 0..MAX_LEVEL (une décimale)
+  count: number; // dénominateur utilisé (toujours le total collecté/possible, pas juste les cases pratiquées)
+}
+
+export interface MasteryOverview {
+  words: MasteryStat; // tous les mots collectés, niveau Traduire russe → français
+  verbs: MasteryStat;
+  adjectives: MasteryStat;
+  declension: MasteryStat; // toutes les cases de déclinaison, tous mots déclinables confondus
+  byCase: { code: CaseCode; label: string; avg: number; count: number }[];
+  translateRuFr: MasteryStat;
+  translateFrRu: MasteryStat;
+}
+
+const DECLINABLE_TYPES: WordType[] = ["noun", "adjective", "pronoun", "numeral"];
+
+function avgOf(values: number[]): MasteryStat {
+  if (values.length === 0) return { avg: 0, count: 0 };
+  const sum = values.reduce((a, b) => a + b, 0);
+  return { avg: Math.round((sum / values.length) * 10) / 10, count: values.length };
+}
+
+/**
+ * Moyennes de maîtrise pour le profil : mots/verbes/adjectifs (niveau Traduire ru→fr), déclinaison
+ * globale + par cas (niveau recall de chaque case, Réviser), et les deux sens de traduction.
+ * Le dénominateur est TOUJOURS le nombre total de mots/cases concerné (collectés ou existant dans
+ * le paradigme), jamais juste ceux déjà pratiqués — sinon un mot vu une seule fois ressortirait
+ * "niveau plein" au lieu de refléter tout ce qui reste à découvrir (même piège que documenté sur
+ * `getCollection`).
+ */
+export async function getMasteryOverview(userId: string): Promise<MasteryOverview> {
+  const empty: MasteryStat = { avg: 0, count: 0 };
+  const emptyByCase = CASE_ORDER.map((code) => ({ code, label: CASE_LABELS[code], avg: 0, count: 0 }));
+
+  const encounters = await prisma.encounter.findMany({
+    where: { userId, entryId: { not: null } },
+    select: { entryId: true },
+    distinct: ["entryId"],
+  });
+  const entryIds = encounters.map((e) => e.entryId!);
+  if (entryIds.length === 0) {
+    return {
+      words: empty,
+      verbs: empty,
+      adjectives: empty,
+      declension: empty,
+      byCase: emptyByCase,
+      translateRuFr: empty,
+      translateFrRu: empty,
+    };
+  }
+
+  const [entries, forms, reviews] = await Promise.all([
+    prisma.dictionaryEntry.findMany({
+      where: { id: { in: entryIds } },
+      select: { id: true, type: true, translationsFr: true },
+    }),
+    prisma.dictionaryForm.findMany({
+      where: { entryId: { in: entryIds } },
+      select: { entryId: true, formKey: true },
+      distinct: ["entryId", "formKey"],
+    }),
+    prisma.formReview.findMany({
+      where: { userId, entryId: { in: entryIds } },
+      select: { entryId: true, formKey: true, repetitions: true },
+    }),
+  ]);
+
+  const typeByEntry = new Map(entries.map((e) => [e.id, e.type as WordType]));
+  const recallLevel = new Map<string, number>(); // `${entryId}|${formKey}` -> niveau
+  const vocabRuFr = new Map<number, number>();
+  const vocabFrRu = new Map<number, number>();
+  for (const r of reviews) {
+    const lvl = Math.min(MAX_LEVEL, r.repetitions);
+    if (r.formKey === "vocab:ru-fr") vocabRuFr.set(r.entryId, lvl);
+    else if (r.formKey === "vocab:fr-ru") vocabFrRu.set(r.entryId, lvl);
+    else if (!r.formKey.includes(":")) recallLevel.set(`${r.entryId}|${r.formKey}`, lvl);
+  }
+
+  const wordsVals = entries.map((e) => vocabRuFr.get(e.id) ?? 0);
+  const verbVals = entries.filter((e) => e.type === "verb").map((e) => vocabRuFr.get(e.id) ?? 0);
+  const adjVals = entries
+    .filter((e) => e.type === "adjective")
+    .map((e) => vocabRuFr.get(e.id) ?? 0);
+
+  const translatable = entries.filter((e) => e.translationsFr);
+  const ruFrVals = translatable.map((e) => vocabRuFr.get(e.id) ?? 0);
+  const frRuVals = translatable.map((e) => vocabFrRu.get(e.id) ?? 0);
+
+  const caseVals = new Map<CaseCode, number[]>();
+  const allDeclVals: number[] = [];
+  for (const f of forms) {
+    const type = typeByEntry.get(f.entryId);
+    if (!type || !DECLINABLE_TYPES.includes(type)) continue;
+    const code = caseOf(f.formKey);
+    if (!code) continue;
+    const lvl = recallLevel.get(`${f.entryId}|${f.formKey}`) ?? 0;
+    allDeclVals.push(lvl);
+    const arr = caseVals.get(code) ?? [];
+    arr.push(lvl);
+    caseVals.set(code, arr);
+  }
+
+  return {
+    words: avgOf(wordsVals),
+    verbs: avgOf(verbVals),
+    adjectives: avgOf(adjVals),
+    declension: avgOf(allDeclVals),
+    byCase: CASE_ORDER.map((code) => {
+      const stat = avgOf(caseVals.get(code) ?? []);
+      return { code, label: CASE_LABELS[code], ...stat };
+    }),
+    translateRuFr: avgOf(ruFrVals),
+    translateFrRu: avgOf(frRuVals),
+  };
+}
+
+export interface TimelinePoint {
+  day: string; // YYYY-MM-DD (Europe/Paris)
+  words: number; // cumulé : mots distincts rencontrés pour la première fois
+  forms: number; // cumulé : cases (mot, formKey) distinctes découvertes pour la première fois
+  verbs: number; // cumulé : verbes distincts rencontrés pour la première fois
+  conjugations: number; // cumulé : cases de conjugaison au niveau maximal (approximatif, voir plus bas)
+  xp: number; // cumulé : XP total gagné
+}
+
+/**
+ * Séries temporelles pour les graphiques de progression du profil. Le schéma ne garde pas
+ * l'historique des niveaux de maîtrise (seul le niveau ACTUEL de chaque FormReview est stocké),
+ * donc "conjugations" est une approximation : la date de dernière mise à jour d'une case de
+ * conjugaison déjà au niveau max, pas la date exacte à laquelle elle l'a atteint. Les autres
+ * séries (mots/formes/verbes/XP) sont exactes, dérivées de dates réellement enregistrées
+ * (Encounter.createdAt, XpEvent.day).
+ */
+export async function getProgressTimeline(userId: string): Promise<TimelinePoint[]> {
+  const [encounters, xpEvents, maxedRecall] = await Promise.all([
+    prisma.encounter.findMany({
+      where: { userId, entryId: { not: null } },
+      select: { entryId: true, matchedFormKey: true, createdAt: true },
+    }),
+    prisma.xpEvent.findMany({ where: { userId }, select: { day: true, amount: true } }),
+    prisma.formReview.findMany({
+      where: { userId, repetitions: { gte: MAX_LEVEL }, NOT: { formKey: { contains: ":" } } },
+      select: { entryId: true, lastReviewedAt: true, dueAt: true },
+    }),
+  ]);
+  if (encounters.length === 0 && xpEvents.length === 0) return [];
+
+  const entryIds = [...new Set([...encounters.map((e) => e.entryId!), ...maxedRecall.map((r) => r.entryId)])];
+  const entries = await prisma.dictionaryEntry.findMany({
+    where: { id: { in: entryIds } },
+    select: { id: true, type: true },
+  });
+  const typeByEntry = new Map(entries.map((e) => [e.id, e.type as WordType]));
+
+  const firstWordDay = new Map<number, string>();
+  const firstFormDay = new Map<string, string>();
+  for (const e of encounters) {
+    const day = parisDay(e.createdAt);
+    if (!firstWordDay.has(e.entryId!) || day < firstWordDay.get(e.entryId!)!) {
+      firstWordDay.set(e.entryId!, day);
+    }
+    if (e.matchedFormKey) {
+      const key = `${e.entryId}|${e.matchedFormKey}`;
+      if (!firstFormDay.has(key) || day < firstFormDay.get(key)!) firstFormDay.set(key, day);
+    }
+  }
+
+  const bump = (m: Map<string, number>, day: string, n = 1) => m.set(day, (m.get(day) ?? 0) + n);
+  const deltaWords = new Map<string, number>();
+  const deltaForms = new Map<string, number>();
+  const deltaVerbs = new Map<string, number>();
+  const deltaConj = new Map<string, number>();
+  const deltaXp = new Map<string, number>();
+
+  for (const [entryId, day] of firstWordDay) {
+    bump(deltaWords, day);
+    if (typeByEntry.get(entryId) === "verb") bump(deltaVerbs, day);
+  }
+  for (const day of firstFormDay.values()) bump(deltaForms, day);
+  for (const r of maxedRecall) {
+    if (typeByEntry.get(r.entryId) !== "verb") continue;
+    bump(deltaConj, parisDay(r.lastReviewedAt ?? r.dueAt));
+  }
+  for (const ev of xpEvents) bump(deltaXp, ev.day, ev.amount);
+
+  const allDays = new Set([
+    ...deltaWords.keys(),
+    ...deltaForms.keys(),
+    ...deltaVerbs.keys(),
+    ...deltaConj.keys(),
+    ...deltaXp.keys(),
+  ]);
+  const sortedDays = [...allDays].sort();
+
+  let words = 0,
+    forms = 0,
+    verbs = 0,
+    conjugations = 0,
+    xp = 0;
+  const points: TimelinePoint[] = [];
+  for (const day of sortedDays) {
+    words += deltaWords.get(day) ?? 0;
+    forms += deltaForms.get(day) ?? 0;
+    verbs += deltaVerbs.get(day) ?? 0;
+    conjugations += deltaConj.get(day) ?? 0;
+    xp += deltaXp.get(day) ?? 0;
+    points.push({ day, words, forms, verbs, conjugations, xp });
+  }
+  return points;
 }
 
 export interface ParadigmCellData {

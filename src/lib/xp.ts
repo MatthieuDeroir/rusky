@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { parisDay, parisYesterday } from "@/lib/dates";
 
@@ -116,10 +117,11 @@ export interface GameStats {
   lastActivityDate: string | null;
 }
 
-/** Everything the dashboard/profile needs, in one call. */
-export async function getGameStats(userId: string): Promise<GameStats> {
-  const stats = await ensureStats(userId);
-  const todayXp = await getTodayXp(userId);
+/** Everything the dashboard/profile needs, in one call. `cache()`-deduped per request: the
+ * root layout (header streak) and the page itself (Accueil/Profil) both call this for the same
+ * user within the same request — without dedup that's the same two queries run twice. */
+export const getGameStats = cache(async (userId: string): Promise<GameStats> => {
+  const [stats, todayXp] = await Promise.all([ensureStats(userId), getTodayXp(userId)]);
   return {
     totalXp: stats.totalXp,
     todayXp,
@@ -129,7 +131,7 @@ export async function getGameStats(userId: string): Promise<GameStats> {
     streakFreezes: stats.streakFreezes,
     lastActivityDate: stats.lastActivityDate,
   };
-}
+});
 
 /** Set the daily XP goal (profile editor). Clamped to a sensible range. */
 export async function setDailyGoal(userId: string, goal: number): Promise<number> {

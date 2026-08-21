@@ -103,11 +103,18 @@ const STATUS_ACCENT: Record<HistoryEntry["status"], string> = {
 };
 
 /** Historique à gauche de la carte (bureau) : un mot par ligne, réponse donnée, statut, et la
- * traduction/forme attendue. Masqué sur petit écran — pas la place, la carte prime. */
+ * traduction/forme attendue. Masqué tant que l'écran n'est pas assez large pour la loger sans
+ * toucher la carte : la carte d'exercice fait max-w-2xl (42rem) centrée, donc son bord gauche est
+ * à `50vw - 21rem` — on ne montre la pile (18rem de large) qu'à partir de la largeur où elle
+ * tient avec une vraie marge des deux côtés, positionnée par rapport au CENTRE du viewport (pas
+ * un `left` fixe) pour que la marge avec la carte reste constante quelle que soit la largeur. */
 export function VerifyPile({ pile }: { pile: HistoryEntry[] }) {
   if (pile.length === 0) return null;
   return (
-    <div className="glass-strong fixed left-4 top-24 z-30 hidden max-h-[70vh] w-72 flex-col rounded-2xl xl:flex">
+    <div
+      className="glass-strong fixed top-24 z-30 hidden max-h-[70vh] w-72 flex-col rounded-2xl min-[1360px]:flex"
+      style={{ left: "max(1rem, calc(50% - 40.5rem))" }}
+    >
       <p className="shrink-0 border-b border-white/8 px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground/40">
         Historique de session
       </p>

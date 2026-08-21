@@ -4,8 +4,6 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { SiteChrome } from "@/components/site-chrome";
 import { UpdatePrompt } from "@/components/pwa/update-prompt";
-import { currentUserId } from "@/lib/auth";
-import { getGameStats } from "@/lib/xp";
 
 // Editorial pairing: Lora (literary serif, for Russian headwords/titles) + Onest (UI).
 const display = Lora({
@@ -40,27 +38,18 @@ export const viewport: Viewport = {
   themeColor: "#1c1813",
 };
 
-async function headerStreak(): Promise<{ streak: number; freezes: number } | null> {
-  try {
-    const userId = await currentUserId();
-    const stats = await getGameStats(userId);
-    return { streak: stats.currentStreak, freezes: stats.streakFreezes };
-  } catch {
-    return null; // not signed in (e.g. /login) — no header stats
-  }
-}
-
-export default async function RootLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  const streak = await headerStreak();
+// Pas d'appel dynamique (cookies/DB) ICI : un layout racine qui lit les cookies force Next.js à
+// re-rendre tout le layout côté serveur à CHAQUE navigation (même client-side), au lieu de le
+// garder monté et de ne rafraîchir que la page — c'était la cause de fond de la lenteur perçue
+// sur toute l'app. Le streak est donc récupéré côté client par SiteChrome (une fois, au montage).
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
       lang="fr"
       className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <SiteChrome streak={streak}>{children}</SiteChrome>
+        <SiteChrome>{children}</SiteChrome>
         <UpdatePrompt />
         <Toaster position="top-center" richColors />
       </body>

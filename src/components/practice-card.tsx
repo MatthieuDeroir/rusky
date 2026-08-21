@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { RussianInput } from "@/components/russian-keyboard";
 import { LevelPips } from "@/components/level-pips";
+import { LevelFilter } from "@/components/level-filter";
 import { useVerifyPile, VerifyPile } from "@/components/verify-pile";
 
 export interface ThemeOption {
@@ -42,6 +43,7 @@ export function PracticeCard({
   mistakesOnly?: boolean;
 }) {
   const [theme, setTheme] = useState<string | undefined>(undefined);
+  const [level, setLevel] = useState<number | undefined>(undefined);
   const [question, setQuestion] = useState<PracticeCardData | "empty" | null>(null);
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<PracticeResult | null>(null);
@@ -59,8 +61,8 @@ export function PracticeCard({
     (exclude?: string) => {
       startLoad(async () => {
         const q = mistakesOnly
-          ? await getMistakeCardAction(exclude)
-          : await getPracticeCardAction(exclude, theme);
+          ? await getMistakeCardAction(exclude, level)
+          : await getPracticeCardAction(exclude, theme, level);
         questionGen.current += 1;
         setQuestion(q);
         setAnswer("");
@@ -68,14 +70,14 @@ export function PracticeCard({
         setTimeout(() => answerRef.current?.focus(), 0);
       });
     },
-    [theme, mistakesOnly],
+    [theme, level, mistakesOnly],
   );
 
   useEffect(() => {
     load();
-    // Changing the theme filter starts a fresh card, not the score.
+    // Changing the theme/level filter starts a fresh card, not the score.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [theme]);
+  }, [theme, level]);
 
   function check() {
     if (!question || question === "empty" || result || !answer.trim()) return;
@@ -110,6 +112,7 @@ export function PracticeCard({
   if (question === "empty") {
     return (
       <div className="space-y-4">
+        <LevelFilter value={level} onChange={setLevel} />
         {!mistakesOnly && themes.length > 1 && (
           <ThemeFilter themes={themes} value={theme} onChange={setTheme} />
         )}
@@ -158,15 +161,14 @@ export function PracticeCard({
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
-        {!mistakesOnly && themes.length > 1 ? (
-          <ThemeFilter themes={themes} value={theme} onChange={setTheme} />
-        ) : (
-          <span />
-        )}
+        <LevelFilter value={level} onChange={setLevel} />
         <span className="shrink-0 text-sm text-foreground/55">
           {score.right}/{score.total}
         </span>
       </div>
+      {!mistakesOnly && themes.length > 1 && (
+        <ThemeFilter themes={themes} value={theme} onChange={setTheme} />
+      )}
 
       <div className="glass-strong rounded-3xl p-8 text-center">
         <div className="flex items-center justify-center gap-2">

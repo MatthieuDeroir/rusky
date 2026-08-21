@@ -60,7 +60,7 @@ export function normalizeFr(input: string): string {
 
 // ---- Labels (French — the user works in French) -------------------------------
 
-const CASE_LABELS: Record<string, string> = {
+export const CASE_LABELS: Record<string, string> = {
   nom: "Nominatif",
   acc: "Accusatif",
   gen: "Génitif",

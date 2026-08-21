@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { prisma } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
-import { addXp, setDailyGoal, type XpAward } from "@/lib/xp";
+import { addXp, setDailyGoal, getGameStats, type XpAward } from "@/lib/xp";
 import {
   review as srsReview,
   nextDueDate,
@@ -54,6 +54,19 @@ import { saveMcqKey, getMcqKey } from "@/lib/exam-items-store";
 
 export async function detectAction(input: string): Promise<DetectionMatch[]> {
   return detectWord(input);
+}
+
+/** Streak + freezes for the header badge. Fetched client-side (see SiteChrome) so the root
+ * layout itself never touches cookies/DB — that's what let a single page navigation re-render
+ * the whole layout server-side every time (see TODO.md "Layout racine toujours dynamique"). */
+export async function getHeaderStreakAction(): Promise<{ streak: number; freezes: number } | null> {
+  try {
+    const userId = await currentUserId();
+    const stats = await getGameStats(userId);
+    return { streak: stats.currentStreak, freezes: stats.streakFreezes };
+  } catch {
+    return null; // not signed in (e.g. /login)
+  }
 }
 
 /** Update the user's daily XP goal (profile). Returns the clamped value that was saved. */
@@ -671,14 +684,23 @@ async function buildCard(
 }
 
 /** Pick the next practice card, or "empty" when there's nothing due and nothing left to
- * discover. `theme` filters to a single grammatical theme key (see `themeOf` in queries.ts). */
+ * discover. `theme` filters to a single grammatical theme key (see `themeOf` in queries.ts).
+ * `level` filters to words whose base-form (Traduire ru→fr) mastery equals exactly that level —
+ * same definition as the Collection, so the two stay correlated. */
 export async function getPracticeCardAction(
   exclude?: string,
   theme?: string,
+  level?: number,
 ): Promise<PracticeCard | "empty"> {
   const userId = await currentUserId();
-  await ensureReviewSeed(userId);
-  const { entries, formsByEntry, discoveredByEntry } = await collectedContext(userId);
+  // ensureReviewSeed (écrit dans FormReview) et collectedContext (lit Encounter/DictionaryEntry/
+  // DictionaryForm) ne dépendent pas l'un de l'autre — seule la requête "due" plus bas doit
+  // attendre que le seed ait committé. Les lancer en série payait un aller-retour Turso pour
+  // rien à CHAQUE carte d'exercice chargée.
+  const [, { entries, formsByEntry, discoveredByEntry }] = await Promise.all([
+    ensureReviewSeed(userId),
+    collectedContext(userId),
+  ]);
   const entryMap = new Map(entries.map((e) => [e.id, e]));
 
   const passesTheme = (entryId: number) => {
@@ -691,6 +713,17 @@ export async function getPracticeCardAction(
     return themeOf(entry, formsByEntry.get(entryId) ?? new Map()).key === theme;
   };
 
+  let levelByEntry: Map<number, number> | null = null;
+  if (level !== undefined) {
+    const vocabReviews = await prisma.formReview.findMany({
+      where: { userId, entryId: { in: entries.map((e) => e.id) }, formKey: "vocab:ru-fr" },
+      select: { entryId: true, repetitions: true },
+    });
+    levelByEntry = new Map(vocabReviews.map((r) => [r.entryId, Math.min(MAX_LEVEL, r.repetitions)]));
+  }
+  const passesLevel = (entryId: number) =>
+    level === undefined || (levelByEntry!.get(entryId) ?? 0) === level;
+
   // 1. Due SRS reviews (recall + translate cards already scheduled). "vocab:" rows belong to
   // the standalone Traduire exercise and have their own spacing — never surface them here.
   const dueRaw = await prisma.formReview.findMany({
@@ -698,7 +731,7 @@ export async function getPracticeCardAction(
     take: 300,
     select: { entryId: true, formKey: true },
   });
-  const due = dueRaw.filter((d) => passesTheme(d.entryId));
+  const due = dueRaw.filter((d) => passesTheme(d.entryId) && passesLevel(d.entryId));
   if (due.length > 0) {
     const choices =
       exclude && due.length > 1
@@ -716,7 +749,7 @@ export async function getPracticeCardAction(
   const pool: { entryId: number; formKey: string }[] = [];
   for (const entry of entries) {
     if (entry.type === "other") continue;
-    if (!passesTheme(entry.id)) continue;
+    if (!passesTheme(entry.id) || !passesLevel(entry.id)) continue;
     const keys = [...(formsByEntry.get(entry.id)?.keys() ?? [])];
     const done = discoveredByEntry.get(entry.id) ?? new Set<string>();
     for (const formKey of keys) {
@@ -737,8 +770,12 @@ export async function getPracticeCardAction(
 
 /** Pick a card among those whose MOST RECENT attempt was wrong (recall or translate — pas les
  * cartes Traduire, qui ont leur propre forme/écran). "Le plus récent" pour ne pas redonner un
- * mot que tu as depuis retrouvé : une seule bonne réponse plus tard suffit à le sortir du lot. */
-export async function getMistakeCardAction(exclude?: string): Promise<PracticeCard | "empty"> {
+ * mot que tu as depuis retrouvé : une seule bonne réponse plus tard suffit à le sortir du lot.
+ * `level` filtre sur le niveau de maîtrise (base ru→fr) du mot, même définition que la Collection. */
+export async function getMistakeCardAction(
+  exclude?: string,
+  level?: number,
+): Promise<PracticeCard | "empty"> {
   const userId = await currentUserId();
   const attempts = await prisma.quizAttempt.findMany({
     where: {
@@ -758,8 +795,24 @@ export async function getMistakeCardAction(exclude?: string): Promise<PracticeCa
     const key = `${a.entryId}|${a.formKey}`;
     if (!latestByKey.has(key)) latestByKey.set(key, a);
   }
-  const wrong = [...latestByKey.values()].filter((a) => !a.correct);
+  let wrong = [...latestByKey.values()].filter((a) => !a.correct);
   if (wrong.length === 0) return "empty";
+
+  if (level !== undefined) {
+    const vocabReviews = await prisma.formReview.findMany({
+      where: {
+        userId,
+        entryId: { in: [...new Set(wrong.map((w) => w.entryId))] },
+        formKey: "vocab:ru-fr",
+      },
+      select: { entryId: true, repetitions: true },
+    });
+    const levelByEntry = new Map(
+      vocabReviews.map((r) => [r.entryId, Math.min(MAX_LEVEL, r.repetitions)]),
+    );
+    wrong = wrong.filter((w) => (levelByEntry.get(w.entryId) ?? 0) === level);
+    if (wrong.length === 0) return "empty";
+  }
 
   const { entries, formsByEntry } = await collectedContext(userId);
   const entryMap = new Map(entries.map((e) => [e.id, e]));

@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { RussianInput } from "@/components/russian-keyboard";
 import { LevelPips } from "@/components/level-pips";
+import { LevelFilter } from "@/components/level-filter";
 import { useVerifyPile, VerifyPile } from "@/components/verify-pile";
 
 /** Vert = exact ; ambre = accepté avec réserve (faute de frappe ou « oui mais ») ; rouge = faux. */
@@ -29,14 +30,16 @@ function ringClass(result: PracticeResult | null): string {
 }
 
 export function VocabCard({
-  level,
+  level: initialLevel,
   mistakesOnly,
 }: {
+  /** Niveau initial (venu de la Collection via l'URL) — reste modifiable ensuite dans la carte. */
   level?: number;
   /** true = ne piocher que dans les mots dont la dernière tentative (ce sens) était fausse. */
   mistakesOnly?: boolean;
 }) {
   const [direction, setDirection] = useState<VocabDirection>("ru-fr");
+  const [level, setLevel] = useState<number | undefined>(initialLevel);
   const [card, setCard] = useState<VocabCardData | "empty" | null>(null);
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<PracticeResult | null>(null);
@@ -124,6 +127,7 @@ export function VocabCard({
     return (
       <div className="space-y-4">
         {directionToggle}
+        <LevelFilter value={level} onChange={setLevel} />
         <div className="glass-strong rounded-3xl p-10 text-center">
           <h2 className="text-xl font-semibold">
             {mistakesOnly ? "Aucune erreur en attente 🎉" : "Rien à traduire pour l’instant"}
@@ -158,8 +162,11 @@ export function VocabCard({
     <div className="space-y-5">
       {directionToggle}
 
-      <div className="flex justify-end text-sm text-foreground/55">
-        {score.right}/{score.total}
+      <div className="flex items-center justify-between gap-3">
+        <LevelFilter value={level} onChange={setLevel} />
+        <span className="shrink-0 text-sm text-foreground/55">
+          {score.right}/{score.total}
+        </span>
       </div>
 
       <div className="glass-strong rounded-3xl p-8 text-center">

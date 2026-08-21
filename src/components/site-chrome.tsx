@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Flame, Snowflake } from "lucide-react";
+import { getHeaderStreakAction } from "@/app/actions";
 import { Logo } from "@/components/logo";
 import { NavLinks } from "@/components/nav-links";
 import { BottomNav } from "@/components/bottom-nav";
@@ -11,14 +13,15 @@ import { MiniPlayer } from "@/components/radio/mini-player";
 
 // Wraps the page in the app chrome (header, footer, bottom nav) — except on /login, which is a
 // standalone full-screen page with no navigation.
-export function SiteChrome({
-  children,
-  streak,
-}: {
-  children: React.ReactNode;
-  streak: { streak: number; freezes: number } | null;
-}) {
+export function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // Récupéré côté client, une seule fois au montage (pas à chaque navigation) : le streak et les
+  // gels ne changent au plus qu'une fois par jour, pas besoin de le refaire à chaque clic — voir
+  // la note dans layout.tsx sur pourquoi ce n'est plus fait côté serveur dans le layout.
+  const [streak, setStreak] = useState<{ streak: number; freezes: number } | null>(null);
+  useEffect(() => {
+    getHeaderStreakAction().then(setStreak);
+  }, []);
 
   if (pathname === "/login") {
     return (

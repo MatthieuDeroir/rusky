@@ -2,17 +2,25 @@ import Link from "next/link";
 import { Flame, Snowflake, Star, Trophy, LogOut, BookOpen, Hash, GraduationCap, Award, ArrowRight } from "lucide-react";
 import { currentUserId, signOut, devBypass } from "@/lib/auth";
 import { getGameStats } from "@/lib/xp";
+import { getMasteryOverview, getProgressTimeline } from "@/lib/queries";
 import { getLevel } from "@/lib/game-levels";
 import { getAchievements } from "@/lib/achievements";
 import { ProgressRing } from "@/components/progress-ring";
 import { GoalEditor } from "@/components/goal-editor";
+import { MasteryBar } from "@/components/mastery-bar";
+import { ProgressSparkline } from "@/components/progress-timeline";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Profil · Русский" };
 
 export default async function ProfilPage() {
   const userId = await currentUserId();
-  const [stats, badges] = await Promise.all([getGameStats(userId), getAchievements(userId)]);
+  const [stats, badges, mastery, timeline] = await Promise.all([
+    getGameStats(userId),
+    getAchievements(userId),
+    getMasteryOverview(userId),
+    getProgressTimeline(userId),
+  ]);
   const level = getLevel(stats.totalXp);
   const unlocked = badges.filter((b) => b.unlocked).length;
 
@@ -51,6 +59,57 @@ export default async function ProfilPage() {
         <Stat icon={<Flame className="size-5 text-primary" />} label="Série" value={stats.currentStreak} />
         <Stat icon={<Trophy className="size-5 text-primary" />} label="Record" value={stats.longestStreak} />
         <Stat icon={<Snowflake className="size-5 text-sky-300" />} label="Gels" value={stats.streakFreezes} />
+      </section>
+
+      {/* Progression dans le temps */}
+      {timeline.length > 1 && (
+        <section className="space-y-3">
+          <h2 className="font-medium">Progression</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <ProgressSparkline title="Mots connus" points={timeline} metric="words" />
+            <ProgressSparkline title="Formes découvertes" points={timeline} metric="forms" />
+            <ProgressSparkline title="Verbes connus" points={timeline} metric="verbs" />
+            <ProgressSparkline title="Conjugaisons maîtrisées" points={timeline} metric="conjugations" />
+            <ProgressSparkline
+              title="Points de maîtrise (XP)"
+              points={timeline}
+              metric="xp"
+              suffix=" XP"
+            />
+          </div>
+        </section>
+      )}
+
+      {/* Maîtrise globale */}
+      <section className="glass rounded-3xl p-6 space-y-5">
+        <h2 className="font-medium">Maîtrise globale</h2>
+        <div className="space-y-3">
+          <MasteryBar label="Mots (russe → français)" stat={mastery.words} />
+          <MasteryBar label="Verbes" stat={mastery.verbs} />
+          <MasteryBar label="Adjectifs" stat={mastery.adjectives} />
+          <MasteryBar label="Déclinaison (ensemble)" stat={mastery.declension} unit="case" />
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-foreground/45">
+            Déclinaison par cas
+          </h3>
+          <div className="space-y-2.5">
+            {mastery.byCase.map((c) => (
+              <MasteryBar key={c.code} label={c.label} stat={{ avg: c.avg, count: c.count }} unit="case" />
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-foreground/45">
+            Traduction
+          </h3>
+          <div className="space-y-2.5">
+            <MasteryBar label="Russe → Français" stat={mastery.translateRuFr} />
+            <MasteryBar label="Français → Russe" stat={mastery.translateFrRu} />
+          </div>
+        </div>
       </section>
 
       {/* Badges */}

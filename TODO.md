@@ -18,6 +18,17 @@ Idées et chantiers identifiés mais pas encore faits. Cocher/supprimer une fois
       piochant que dans les mots dont la dernière tentative a échoué. Pas encore d'autres types
       (Cas, Chiffres…) dans ce sélecteur — à étendre si besoin.
 
+## Performance
+
+- [x] **Layout racine toujours dynamique** (`src/app/layout.tsx`) : `currentUserId()` (lit les
+      cookies) y était appelé directement, ce qui forçait Next.js à re-rendre le layout entier à
+      CHAQUE navigation. Corrigé le 2026-08-21 : le streak d'en-tête est maintenant récupéré côté
+      client par `SiteChrome` (`getHeaderStreakAction`, une fois au montage) — le layout racine ne
+      touche plus aucune API dynamique. Complète les correctifs déjà faits ce jour-là :
+      `getGameStats` parallélisé + dédupliqué (`cache()`), `ensureReviewSeed`/`collectedContext`
+      parallélisés dans `getPracticeCardAction`, `window.location.href` → `router.push` dans
+      Ajouter un mot.
+
 ## Dictionnaire (qualité des données)
 
 - [ ] 92 autres entrées du dictionnaire ont le même symptôme que l'ancien bug кошки (le lemme ne
