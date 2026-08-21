@@ -1000,6 +1000,11 @@ export async function submitPracticeAction(
     revalidatePath(`/word/${input.entryId}`);
   }
 
+  // Champ vide = "je ne sais pas" (bouton dédié, ou Entrée sans rien écrire) : faux d'office,
+  // classé "oubli" tout de suite, jamais la peine de demander un second avis IA dessus.
+  const isDontKnow = !input.answer.trim();
+  const mistakeKind: MistakeKind | undefined = !correct && isDontKnow ? "oubli" : undefined;
+
   const xpSource = input.kind === "recall" ? (discovered ? "discover" : "review") : "translate";
   const outcome = await writeReviewOutcome(
     userId,
@@ -1010,10 +1015,11 @@ export async function submitPracticeAction(
     false,
     priorState,
     xpSource,
+    mistakeKind,
   );
   if (discovered) revalidatePath("/");
 
-  const pending = !correct && !!input.answer.trim() && worthAsking;
+  const pending = !correct && !isDontKnow && worthAsking;
   return {
     correct,
     expected,
@@ -1021,6 +1027,7 @@ export async function submitPracticeAction(
     discovered,
     tolerated: false,
     close: false,
+    mistakeKind,
     level: outcome.level,
     previousLevel: outcome.previousLevel,
     levelLabel: outcome.levelLabel,
@@ -1558,6 +1565,9 @@ export async function submitVocabAction(input: {
       }
     : INITIAL_STATE;
 
+  const isDontKnow = !input.answer.trim();
+  const mistakeKind: MistakeKind | undefined = !correct && isDontKnow ? "oubli" : undefined;
+
   const outcome = await writeReviewOutcome(
     userId,
     input.entryId,
@@ -1567,9 +1577,10 @@ export async function submitVocabAction(input: {
     false,
     priorState,
     "translate",
+    mistakeKind,
   );
 
-  const pending = !correct && !!input.answer.trim() && worthAsking;
+  const pending = !correct && !isDontKnow && worthAsking;
   return {
     correct,
     expected,
@@ -1577,6 +1588,7 @@ export async function submitVocabAction(input: {
     discovered: false,
     tolerated: false,
     close: false,
+    mistakeKind,
     level: outcome.level,
     previousLevel: outcome.previousLevel,
     levelLabel: outcome.levelLabel,

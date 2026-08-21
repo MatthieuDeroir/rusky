@@ -68,10 +68,13 @@ export function VocabCard({
     load();
   }, [load]);
 
-  function check() {
-    if (!card || card === "empty" || result || !answer.trim()) return;
+  // Champ vide accepté volontairement : "Je ne sais pas" (bouton dédié) ou Entrée sans rien écrit
+  // doivent compter comme une réponse (fausse, sans appel IA), pas rester sans effet. `forced`
+  // permet au bouton de soumettre vide même si du texte est déjà tapé (setState est différé).
+  function check(forced?: string) {
+    if (!card || card === "empty" || result) return;
     const gen = cardGen.current;
-    const askedAnswer = answer.trim();
+    const askedAnswer = (forced ?? answer).trim();
     startCheck(async () => {
       const r = await submitVocabAction({
         entryId: card.entryId,
@@ -265,9 +268,23 @@ export function VocabCard({
 
           <div className="mt-5 flex justify-center gap-3">
             {!result ? (
-              <Button type="submit" size="lg" disabled={isChecking || !answer.trim()}>
-                {isChecking ? "Vérification…" : "Vérifier"}
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="lg"
+                  disabled={isChecking}
+                  onClick={() => {
+                    setAnswer("");
+                    check("");
+                  }}
+                >
+                  Je ne sais pas
+                </Button>
+                <Button type="submit" size="lg" disabled={isChecking}>
+                  {isChecking ? "Vérification…" : "Vérifier"}
+                </Button>
+              </>
             ) : (
               <Button type="submit" size="lg" disabled={isLoading}>
                 {isLoading ? "…" : "Suivant"}
