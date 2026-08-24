@@ -16,6 +16,8 @@ export interface PaperStatus {
   status: string;
   error: string | null;
   subtests: SubtestCode[];
+  totalSlots: number | null;
+  resolvedSlots: number;
 }
 
 export async function createExamPaperAction(input: {
@@ -36,7 +38,7 @@ export async function getPaperStatusAction(paperId: number): Promise<PaperStatus
   const userId = await currentUserId();
   const paper = await prisma.trkiPaper.findFirst({
     where: { id: paperId, userId },
-    select: { id: true, status: true, error: true, subtests: true },
+    select: { id: true, status: true, error: true, subtests: true, totalSlots: true, resolvedSlots: true },
   });
   if (!paper) return null;
   return {
@@ -44,6 +46,8 @@ export async function getPaperStatusAction(paperId: number): Promise<PaperStatus
     status: paper.status,
     error: paper.error,
     subtests: JSON.parse(paper.subtests) as SubtestCode[],
+    totalSlots: paper.totalSlots,
+    resolvedSlots: paper.resolvedSlots,
   };
 }
 
@@ -54,6 +58,8 @@ export interface PaperListEntry {
   subtests: SubtestCode[];
   createdAt: string;
   itemCount: number;
+  totalSlots: number | null;
+  resolvedSlots: number;
 }
 
 export async function listPapersAction(): Promise<PaperListEntry[]> {
@@ -68,6 +74,8 @@ export async function listPapersAction(): Promise<PaperListEntry[]> {
       purpose: true,
       subtests: true,
       createdAt: true,
+      totalSlots: true,
+      resolvedSlots: true,
       _count: { select: { items: true } },
     },
   });
@@ -78,6 +86,8 @@ export async function listPapersAction(): Promise<PaperListEntry[]> {
     subtests: JSON.parse(p.subtests) as SubtestCode[],
     createdAt: p.createdAt.toISOString(),
     itemCount: p._count.items,
+    totalSlots: p.totalSlots,
+    resolvedSlots: p.resolvedSlots,
   }));
 }
 

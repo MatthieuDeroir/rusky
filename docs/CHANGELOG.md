@@ -44,8 +44,20 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/).
   tirés) : plus aucun rejet passe 4 ; les rejets restants sont des erreurs de génération
   ponctuelles (schéma/structure/cible) déjà couvertes par le mécanisme de retry existant.
 
+### Added (suite)
+- Passes de "top-up" (`TOP_UP_ROUNDS = 2`) dans `runGeneration` : les slots encore non résolus
+  après le premier passage (retries épuisés + rien en banque) sont retentés jusqu'à 2 fois de
+  plus avant d'abandonner le sujet — un échec de génération est souvent ponctuel (structure QCM
+  dupliquée, mauvais mot mis en trou), pas systématique.
+- Barre de progression en temps réel côté hub (`/objectif-b1/examens`) : `TrkiPaper.totalSlots`/
+  `resolvedSlots` mis à jour à chaque item résolu pendant la génération, affichés côté client
+  (poll 1,5 s) avec une barre qui se remplit + pourcentage, au lieu du seul libellé texte
+  "Génération en cours…".
+
 ## Migrations
 
 - `20260824115519_add_objectif_b1_module` — schéma initial du module (local + Turso).
 - `20260824122610_add_trki_bank_item_rejected` — trace les items rejetés (passes 1-5) pour
   `/admin/health`, en plus des items validés/quarantinés (local + Turso).
+- `20260824140847_add_trki_paper_progress` — `TrkiPaper.totalSlots`/`resolvedSlots` pour la barre
+  de progression (local + Turso).

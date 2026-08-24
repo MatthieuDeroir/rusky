@@ -259,6 +259,8 @@ model TrkiPaper {
   purpose          String    @default("EXAM") // 'EXAM' (compte pour le banking) | 'PRACTICE'
   status           String    @default("PENDING") // 'PENDING' | 'GENERATING' | 'READY' | 'FAILED'
   error            String?
+  totalSlots       Int? // nombre d'items à résoudre — permet une barre de progression côté UI
+  resolvedSlots    Int       @default(0) // items déjà résolus (générés ou resservis depuis la banque)
   createdAt        DateTime  @default(now())
   readyAt          DateTime?
 

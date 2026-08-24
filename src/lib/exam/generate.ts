@@ -194,6 +194,12 @@ function describeFailure(steps: ValidationStep[]): string {
   return failed ? `Passe "${failed.name}" rejetée : ${failed.detail ?? "raison non précisée"}.` : "raison inconnue";
 }
 
+// Passes supplémentaires ciblant uniquement les slots encore non résolus après le premier passage
+// (chacun ayant déjà épuisé MAX_RETRIES tentatives + repli banque). Une passe d'un item peut
+// échouer pour une raison ponctuelle (structure QCM dupliquée, mauvais mot mis en trou…) sans que
+// ce soit systématique — retenter donne une vraie deuxième chance avant d'abandonner le sujet.
+const TOP_UP_ROUNDS = 2;
+
 async function runGeneration(paperId: number, input: CreatePaperInput): Promise<void> {
   await prisma.trkiPaper.update({ where: { id: paperId }, data: { status: "GENERATING" } });
   const paper = await prisma.trkiPaper.findUniqueOrThrow({ where: { id: paperId } });
@@ -211,10 +217,33 @@ async function runGeneration(paperId: number, input: CreatePaperInput): Promise<
       return;
     }
 
+    await prisma.trkiPaper.update({
+      where: { id: paperId },
+      data: { totalSlots: slots.length, resolvedSlots: 0 },
+    });
+
     const recentBankItemIds = await findRecentBankItemIds(input.userId);
-    const resolved = await mapWithConcurrency(slots, CONCURRENCY, (slot) =>
-      resolveSlot(slot, input.userId, recentBankItemIds),
+    const resolved: (ResolvedItem | null)[] = new Array(slots.length).fill(null);
+
+    async function resolveAndTrack(index: number) {
+      resolved[index] = await resolveSlot(slots[index], input.userId, recentBankItemIds);
+      const resolvedCount = resolved.filter((r) => r !== null).length;
+      await prisma.trkiPaper
+        .update({ where: { id: paperId }, data: { resolvedSlots: resolvedCount } })
+        .catch(() => {}); // la progression n'est qu'informative, jamais bloquante
+    }
+
+    await mapWithConcurrency(
+      slots.map((_, i) => i),
+      CONCURRENCY,
+      resolveAndTrack,
     );
+
+    for (let round = 0; round < TOP_UP_ROUNDS; round++) {
+      const stillFailed = resolved.map((r, i) => (r === null ? i : -1)).filter((i) => i >= 0);
+      if (stillFailed.length === 0) break;
+      await mapWithConcurrency(stillFailed, CONCURRENCY, resolveAndTrack);
+    }
 
     const failedCount = resolved.filter((r) => r === null).length;
     if (failedCount > 0) {
@@ -222,7 +251,7 @@ async function runGeneration(paperId: number, input: CreatePaperInput): Promise<
         where: { id: paperId },
         data: {
           status: "FAILED",
-          error: `${failedCount}/${slots.length} item(s) n'ont pas pu être générés ni resservis depuis la banque.`,
+          error: `${failedCount}/${slots.length} item(s) n'ont pas pu être générés ni resservis depuis la banque (après ${TOP_UP_ROUNDS + 1} passages).`,
         },
       });
       return;
