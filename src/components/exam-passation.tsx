@@ -8,12 +8,21 @@ import {
   submitTrkiAnswerAction,
   type PassationData,
 } from "@/app/objectif-b1/actions";
+import { SpeakingPassation } from "@/components/speaking-passation";
 import { Button } from "@/components/ui/button";
 import { Progress, ProgressTrack, ProgressIndicator } from "@/components/ui/progress";
 
 const LETTERS = ["A", "B", "C", "D"];
 
+/** Point d'entrée unique de la passation — délègue selon le sous-test : QCM (lexgram/reading/
+ * listening) ici même, production libre (speaking/writing) à un composant dédié (chronométrage
+ * prépa/réponse, pas de matrice de réponses). */
 export function ExamPassation({ data, paperId }: { data: PassationData; paperId: number }) {
+  if (data.subtest === "speaking") return <SpeakingPassation data={data} paperId={paperId} />;
+  return <QcmPassation data={data} paperId={paperId} />;
+}
+
+function QcmPassation({ data, paperId }: { data: PassationData; paperId: number }) {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const totalSeconds = data.durationMin * 60;
@@ -76,7 +85,7 @@ export function ExamPassation({ data, paperId }: { data: PassationData; paperId:
             <p className="text-sm text-foreground/50">Item {i + 1}</p>
             <p className="mt-1 text-lg">{item.stem}</p>
             <ul className="mt-3 space-y-1 text-sm text-foreground/70">
-              {item.options.map((opt, idx) => (
+              {(item.options ?? []).map((opt, idx) => (
                 <li key={idx}>
                   {LETTERS[idx]}. {opt}
                 </li>

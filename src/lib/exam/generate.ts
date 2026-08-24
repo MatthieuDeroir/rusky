@@ -6,12 +6,18 @@
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { prisma } from "@/lib/db";
-import { generateLexgramItem } from "@/lib/mistral";
+import { generateLexgramItem, generateSpeakingItem } from "@/lib/mistral";
 import { TRKI1_CONFIG, type SubtestCode } from "./config";
 import { buildLexgramSlots, LEXGRAM_BLUEPRINT_VERSION, type LexgramSlot } from "./blueprints/lexgram-v1";
+import { buildSpeakingSlots, SPEAKING_BLUEPRINT_VERSION, type SpeakingSlot } from "./blueprints/speaking-v1";
 import { validateLexgramItem, type ValidationStep } from "./validate";
-import type { LexgramPayload } from "./types";
+import { validateSpeakingItem } from "./validate-speaking";
+import type { LexgramPayload, WritingSpeakingPayload } from "./types";
 import * as caseGovernmentVerbPrompt from "./prompts/lexgram.case-government-verb";
+import * as reactiveDialoguePrompt from "./prompts/speaking.reactive-dialogue";
+import * as initiativeDialoguePrompt from "./prompts/speaking.initiative-dialogue";
+import * as situationalDialoguePrompt from "./prompts/speaking.situational-dialogue";
+import * as monologuePrompt from "./prompts/speaking.monologue";
 
 // Concurrence réduite de 4 à 2 : observé en prod, 4 slots en parallèle (chacun générant +
 // solveur, jusqu'à MAX_RETRIES fois) déclenchait le rate limit Mistral 429 (voir aussi le
@@ -20,13 +26,24 @@ const CONCURRENCY = 2;
 const MAX_RETRIES = 4;
 const BANK_LOOKBACK_PAPERS = 5;
 
-interface PromptModule {
+interface LexgramPromptModule {
   systemPrompt: string;
   buildUserPrompt: (slot: LexgramSlot, rejectionReason?: string) => string;
 }
+interface SpeakingPromptModule {
+  systemPrompt: string;
+  buildUserPrompt: (slot: SpeakingSlot, rejectionReason?: string) => string;
+}
 
-const PROMPT_REGISTRY: Record<string, PromptModule> = {
-  "lexgram.case-government-verb": caseGovernmentVerbPrompt as unknown as PromptModule,
+const LEXGRAM_PROMPT_REGISTRY: Record<string, LexgramPromptModule> = {
+  "lexgram.case-government-verb": caseGovernmentVerbPrompt as unknown as LexgramPromptModule,
+};
+
+const SPEAKING_PROMPT_REGISTRY: Record<string, SpeakingPromptModule> = {
+  "speaking.reactive-dialogue": reactiveDialoguePrompt,
+  "speaking.initiative-dialogue": initiativeDialoguePrompt,
+  "speaking.situational-dialogue": situationalDialoguePrompt,
+  "speaking.monologue": monologuePrompt,
 };
 
 export interface CreatePaperInput {
@@ -35,15 +52,21 @@ export interface CreatePaperInput {
   purpose?: "EXAM" | "PRACTICE";
   /** Restreint les typeId lexgram générés — passation indépendante d'une sous-partie (§H). */
   lexgramTypeIds?: string[];
+  /** Restreint les typeId speaking générés — même principe. */
+  speakingTypeIds?: string[];
 }
 
 export async function createPaper(input: CreatePaperInput): Promise<{ paperId: number }> {
   const seed = randomUUID();
+  const versions: string[] = [];
+  if (input.subtests.includes("lexgram")) versions.push(LEXGRAM_BLUEPRINT_VERSION);
+  if (input.subtests.includes("speaking")) versions.push(SPEAKING_BLUEPRINT_VERSION);
+
   const paper = await prisma.trkiPaper.create({
     data: {
       userId: input.userId,
       seed,
-      blueprintVersion: LEXGRAM_BLUEPRINT_VERSION,
+      blueprintVersion: versions.join("+") || "none",
       subtests: JSON.stringify(input.subtests),
       purpose: input.purpose ?? "EXAM",
       status: "PENDING",
@@ -73,9 +96,9 @@ async function mapWithConcurrency<T, R>(
 }
 
 interface ResolvedItem {
-  slot: LexgramSlot;
-  payload: LexgramPayload;
-  correctIndex: number;
+  slot: LexgramSlot | SpeakingSlot;
+  payload: LexgramPayload | WritingSpeakingPayload;
+  answerKey: object;
   bankItemId: number;
 }
 
@@ -96,7 +119,7 @@ async function resolveSlot(
   userId: string,
   recentBankItemIds: Set<number>,
 ): Promise<ResolvedItem | null> {
-  const promptModule = PROMPT_REGISTRY[slot.typeId];
+  const promptModule = LEXGRAM_PROMPT_REGISTRY[slot.typeId];
   if (!promptModule) return null;
 
   let rejectionReason: string | undefined;
@@ -127,7 +150,7 @@ async function resolveSlot(
           lastUsedAt: new Date(),
         },
       });
-      return { slot, payload: result.payload, correctIndex: result.answerKey.correctIndex, bankItemId: bankItem.id };
+      return { slot, payload: result.payload, answerKey: result.answerKey, bankItemId: bankItem.id };
     }
     if (result.quarantined && result.payload) {
       await prisma.trkiBankItem.create({
@@ -178,8 +201,81 @@ async function resolveSlot(
     data: { usedCount: { increment: 1 }, lastUsedAt: new Date() },
   });
   const payload = JSON.parse(fallback.payload) as LexgramPayload;
-  const answerKey = JSON.parse(fallback.answerKey) as { correctIndex: number };
-  return { slot, payload, correctIndex: answerKey.correctIndex, bankItemId: fallback.id };
+  const answerKey = JSON.parse(fallback.answerKey) as Record<string, unknown>;
+  return { slot, payload, answerKey, bankItemId: fallback.id };
+}
+
+async function resolveSpeakingSlot(
+  slot: SpeakingSlot,
+  recentBankItemIds: Set<number>,
+): Promise<ResolvedItem | null> {
+  const promptModule = SPEAKING_PROMPT_REGISTRY[slot.typeId];
+  if (!promptModule) return null;
+
+  let rejectionReason: string | undefined;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const userPrompt = promptModule.buildUserPrompt(slot, rejectionReason);
+    let raw: unknown;
+    try {
+      raw = await generateSpeakingItem(promptModule.systemPrompt, userPrompt);
+    } catch (e) {
+      rejectionReason = `appel Mistral échoué : ${e instanceof Error ? e.message : "erreur"}`;
+      continue;
+    }
+    const result = await validateSpeakingItem(raw, slot);
+    if (result.ok && result.payload) {
+      const contentHash = normalizeContentHash(
+        result.payload.instructions + (result.payload.supportText ?? "") + (result.payload.stimuli?.join("") ?? ""),
+      );
+      const bankItem = await prisma.trkiBankItem.create({
+        data: {
+          subtest: slot.subtest,
+          typeId: slot.typeId,
+          targetId: slot.targetId,
+          payload: JSON.stringify(result.payload),
+          answerKey: "{}",
+          distractorClasses: "[]",
+          contentHash,
+          validatedBy: JSON.stringify(result.steps),
+          quarantined: false,
+          usedCount: 1,
+          lastUsedAt: new Date(),
+        },
+      });
+      return { slot, payload: result.payload, answerKey: {}, bankItemId: bankItem.id };
+    }
+    // Pas de passe de contre-résolution côté speaking (production libre, pas de clé à vérifier) —
+    // tout échec est un rejet direct (schéma/alphabet/structure/lexique), jamais une quarantaine.
+    await prisma.trkiBankItem.create({
+      data: {
+        subtest: slot.subtest,
+        typeId: slot.typeId,
+        targetId: slot.targetId,
+        payload: JSON.stringify(result.payload ?? { raw }),
+        answerKey: "{}",
+        distractorClasses: "[]",
+        contentHash: `rejected-${Date.now()}-${Math.random()}`,
+        validatedBy: JSON.stringify(result.steps),
+        rejected: true,
+      },
+    });
+    rejectionReason = describeFailure(result.steps);
+  }
+
+  const candidates = await prisma.trkiBankItem.findMany({
+    where: { typeId: slot.typeId, targetId: slot.targetId, quarantined: false, rejected: false },
+    orderBy: { usedCount: "asc" },
+    take: 10,
+  });
+  const fallback = candidates.find((c) => !recentBankItemIds.has(c.id)) ?? candidates[0];
+  if (!fallback) return null;
+
+  await prisma.trkiBankItem.update({
+    where: { id: fallback.id },
+    data: { usedCount: { increment: 1 }, lastUsedAt: new Date() },
+  });
+  const payload = JSON.parse(fallback.payload) as WritingSpeakingPayload;
+  return { slot, payload, answerKey: {}, bankItemId: fallback.id };
 }
 
 function normalizeContentHash(stem: string): string {
@@ -205,9 +301,10 @@ async function runGeneration(paperId: number, input: CreatePaperInput): Promise<
   const paper = await prisma.trkiPaper.findUniqueOrThrow({ where: { id: paperId } });
 
   try {
-    const slots: LexgramSlot[] = input.subtests.includes("lexgram")
-      ? buildLexgramSlots(paper.seed, input.lexgramTypeIds)
-      : [];
+    const slots: (LexgramSlot | SpeakingSlot)[] = [
+      ...(input.subtests.includes("lexgram") ? buildLexgramSlots(paper.seed, input.lexgramTypeIds) : []),
+      ...(input.subtests.includes("speaking") ? buildSpeakingSlots(paper.seed, input.speakingTypeIds) : []),
+    ];
 
     if (slots.length === 0) {
       await prisma.trkiPaper.update({
@@ -226,7 +323,11 @@ async function runGeneration(paperId: number, input: CreatePaperInput): Promise<
     const resolved: (ResolvedItem | null)[] = new Array(slots.length).fill(null);
 
     async function resolveAndTrack(index: number) {
-      resolved[index] = await resolveSlot(slots[index], input.userId, recentBankItemIds);
+      const slot = slots[index];
+      resolved[index] =
+        slot.subtest === "lexgram"
+          ? await resolveSlot(slot, input.userId, recentBankItemIds)
+          : await resolveSpeakingSlot(slot, recentBankItemIds);
       const resolvedCount = resolved.filter((r) => r !== null).length;
       await prisma.trkiPaper
         .update({ where: { id: paperId }, data: { resolvedSlots: resolvedCount } })
@@ -268,9 +369,14 @@ async function runGeneration(paperId: number, input: CreatePaperInput): Promise<
             targetId: r!.slot.targetId,
             position: i,
             payload: JSON.stringify(r!.payload),
-            answerKey: JSON.stringify({ correctIndex: r!.correctIndex }),
-            // Barème officiel (docs/adr/0006) : 1 pt/item en lexgram, 7 en lecture, 4 en écoute.
-            points: TRKI1_CONFIG.subtests[r!.slot.subtest].pointsPerItem ?? 1,
+            answerKey: JSON.stringify(r!.answerKey),
+            // Barème officiel (docs/adr/0006) : 1 pt/item en lexgram, 7 en lecture, 4 en écoute —
+            // uniforme par sous-test. speaking/writing pèsent différemment par tâche (slot.points,
+            // ex. 42/42/43/43 pour les 4 tâches speaking) : priorité au poids du slot s'il existe.
+            points:
+              r!.slot.points ??
+              (TRKI1_CONFIG.subtests[r!.slot.subtest] as { pointsPerItem?: number }).pointsPerItem ??
+              1,
           },
         }),
       ),

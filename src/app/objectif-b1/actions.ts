@@ -11,7 +11,9 @@ import { addEncounterAction } from "@/app/actions";
 import type { XpAward } from "@/lib/xp";
 import { createPaper } from "@/lib/exam/generate";
 import { isPassed, TRKI1_CONFIG, type PassResult, type SubtestCode } from "@/lib/exam/config";
-import type { LexgramPayload } from "@/lib/exam/types";
+import type { LexgramPayload, WritingSpeakingPayload, RaterFeedback } from "@/lib/exam/types";
+import { SPEAKING_TIMING } from "@/lib/exam/blueprints/speaking-v1";
+import { gradeSpeaking } from "@/lib/mistral";
 import { getB1State, getDayEntryIds } from "@/lib/exam/b1-curriculum";
 import { WORD_TYPE_LABELS, type WordType } from "@/lib/grammar";
 
@@ -95,13 +97,23 @@ export async function listPapersAction(): Promise<PaperListEntry[]> {
   }));
 }
 
-/** Item sans la clé — c'est tout ce que le client doit voir pendant la passation. */
+/** Item sans la clé — c'est tout ce que le client doit voir pendant la passation. Les champs
+ * QCM (stem/options) et production libre (instructions/supportText/stimuli/prepSec/responseSec)
+ * sont mutuellement exclusifs selon le subtest de l'item. */
 export interface PassationItem {
   id: number;
   position: number;
   typeId: string;
-  stem: string;
-  options: string[];
+  subtest: SubtestCode;
+  // QCM (lexgram/reading/listening)
+  stem?: string;
+  options?: string[];
+  // Production libre (speaking/writing)
+  instructions?: string;
+  supportText?: string;
+  stimuli?: string[];
+  prepSec?: number;
+  responseSec?: number;
 }
 
 export interface PassationData {
@@ -120,7 +132,6 @@ export async function startAttemptAction(paperId: number, subtest: SubtestCode):
     data: { userId, paperId, mode: "FULL" },
   });
 
-  const { TRKI1_CONFIG } = await import("@/lib/exam/config");
   const items = await prisma.trkiItem.findMany({
     where: { paperId, subtest },
     orderBy: { position: "asc" },
@@ -131,11 +142,27 @@ export async function startAttemptAction(paperId: number, subtest: SubtestCode):
     subtest,
     durationMin: TRKI1_CONFIG.subtests[subtest].durationMin,
     items: items.map((it) => {
+      if (subtest === "speaking") {
+        const payload = JSON.parse(it.payload) as WritingSpeakingPayload;
+        const timing = SPEAKING_TIMING[it.typeId] ?? { prepSec: 60, responseSec: 120 };
+        return {
+          id: it.id,
+          position: it.position,
+          typeId: it.typeId,
+          subtest,
+          instructions: payload.instructions,
+          supportText: payload.supportText,
+          stimuli: payload.stimuli,
+          prepSec: timing.prepSec,
+          responseSec: timing.responseSec,
+        };
+      }
       const payload = JSON.parse(it.payload) as LexgramPayload;
       return {
         id: it.id,
         position: it.position,
         typeId: it.typeId,
+        subtest,
         stem: payload.stem,
         options: payload.options.map((o) => o.text),
       };
@@ -164,6 +191,54 @@ export async function submitTrkiAnswerAction(
   return { correct };
 }
 
+/** Soumet le transcript ASR d'une réponse orale et le fait noter par le rater (§7.3 du spec).
+ * Score fractionnaire (pointsAwarded, sur item.points) — une tâche de production libre n'est pas
+ * 0/1 comme un QCM. `correct` reste posé (seuil 60%) pour le carnet d'erreurs (§J, plus tard). */
+export async function submitSpeakingResponseAction(input: {
+  attemptId: number;
+  itemId: number;
+  transcript: string;
+  durationSec: number;
+}): Promise<{ feedback: RaterFeedback; pointsAwarded: number; maxPoints: number }> {
+  const userId = await currentUserId();
+  const attempt = await prisma.trkiAttempt.findFirst({ where: { id: input.attemptId, userId } });
+  if (!attempt) throw new Error("Tentative introuvable.");
+  const item = await prisma.trkiItem.findUniqueOrThrow({ where: { id: input.itemId } });
+  const payload = JSON.parse(item.payload) as WritingSpeakingPayload;
+  const wordCount = input.transcript.trim().split(/\s+/).filter(Boolean).length;
+
+  const feedback = await gradeSpeaking(payload, input.transcript, {
+    durationSec: input.durationSec,
+    wordCount,
+  });
+  const scoreValues = Object.values(feedback.scores);
+  const fraction = scoreValues.length
+    ? scoreValues.reduce((a, b) => a + b, 0) / (scoreValues.length * 5)
+    : 0;
+  const pointsAwarded = Math.round(fraction * item.points);
+  const correct = fraction >= 0.6;
+
+  await prisma.trkiResponse.upsert({
+    where: { attemptId_itemId: { attemptId: input.attemptId, itemId: input.itemId } },
+    update: {
+      answer: JSON.stringify({ transcript: input.transcript, durationSec: input.durationSec }),
+      correct,
+      pointsAwarded,
+      feedback: JSON.stringify(feedback),
+    },
+    create: {
+      attemptId: input.attemptId,
+      itemId: input.itemId,
+      answer: JSON.stringify({ transcript: input.transcript, durationSec: input.durationSec }),
+      correct,
+      pointsAwarded,
+      feedback: JSON.stringify(feedback),
+    },
+  });
+
+  return { feedback, pointsAwarded, maxPoints: item.points };
+}
+
 export interface SubtestResultView {
   subtest: SubtestCode;
   rawScore: number;
@@ -183,14 +258,16 @@ export async function finishAttemptAction(
   if (!attempt) throw new Error("Tentative introuvable.");
 
   // item.points porte déjà le barème officiel par sous-test (posé à la génération depuis
-  // TRKI1_CONFIG.subtests[subtest].pointsPerItem, ex. 7 pts/item en lecture, 4 en écoute) — pas
-  // besoin de le relire ici, juste de sommer.
+  // TRKI1_CONFIG.subtests[subtest].pointsPerItem ou slot.points, ex. 7 pts/item en lecture, 4 en
+  // écoute, 42-43 en speaking) — pas besoin de le relire ici, juste de sommer. Un QCM est 0/points
+  // (correct booléen) ; une tâche de production libre (speaking/writing) est notée en fractionnel
+  // par le rater (pointsAwarded, submitSpeakingResponseAction) — priorité à pointsAwarded s'il existe.
   const bySubtest = new Map<SubtestCode, { raw: number; max: number }>();
   for (const r of attempt.responses) {
     const subtest = r.item.subtest as SubtestCode;
     const acc = bySubtest.get(subtest) ?? { raw: 0, max: 0 };
     acc.max += r.item.points;
-    if (r.correct) acc.raw += r.item.points;
+    acc.raw += r.pointsAwarded ?? (r.correct ? r.item.points : 0);
     bySubtest.set(subtest, acc);
   }
 
@@ -216,7 +293,16 @@ export async function finishAttemptAction(
 export interface ResultsData {
   results: SubtestResultView[];
   passResult: PassResult;
-  perTarget: { targetId: string; typeId: string; correct: boolean; stem: string }[];
+  perTarget: {
+    targetId: string;
+    typeId: string;
+    subtest: SubtestCode;
+    correct: boolean;
+    stem: string;
+    pointsAwarded: number | null;
+    maxPoints: number;
+    feedback: RaterFeedback | null;
+  }[];
 }
 
 export async function getAttemptResultsAction(attemptId: number): Promise<ResultsData | null> {
@@ -242,12 +328,23 @@ export async function getAttemptResultsAction(attemptId: number): Promise<Result
   return {
     results,
     passResult,
-    perTarget: attempt.responses.map((r) => ({
-      targetId: r.item.targetId,
-      typeId: r.item.typeId,
-      correct: r.correct ?? false,
-      stem: (JSON.parse(r.item.payload) as LexgramPayload).stem,
-    })),
+    perTarget: attempt.responses.map((r) => {
+      const subtest = r.item.subtest as SubtestCode;
+      const stem =
+        subtest === "speaking"
+          ? (JSON.parse(r.item.payload) as WritingSpeakingPayload).instructions
+          : (JSON.parse(r.item.payload) as LexgramPayload).stem;
+      return {
+        targetId: r.item.targetId,
+        typeId: r.item.typeId,
+        subtest,
+        correct: r.correct ?? false,
+        stem,
+        pointsAwarded: r.pointsAwarded,
+        maxPoints: r.item.points,
+        feedback: r.feedback ? (JSON.parse(r.feedback) as RaterFeedback) : null,
+      };
+    }),
   };
 }
 

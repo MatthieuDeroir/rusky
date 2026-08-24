@@ -364,6 +364,9 @@ model TrkiResponse {
   item       TrkiItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
   answer     String // JSON : index (QCM) ou texte/transcript libre (writing/speaking)
   correct    Boolean? // null tant que non corrigé (rater async pour writing/speaking)
+  // Score fractionnaire du rater (writing/speaking, 0..item.points) — les tâches production libre
+  // ne sont pas 0/1 comme un QCM. Null = score binaire classique (item.points si correct, sinon 0).
+  pointsAwarded Float?
   feedback   String? // JSON : grille + errors[] du rater, item par item (writing/speaking)
   answeredAt DateTime    @default(now())
 

@@ -15,6 +15,7 @@ import {
   PASS_SCORE,
   targetDescription,
 } from "./torfl";
+import type { RaterFeedback } from "./exam/types";
 
 const ENDPOINT = "https://api.mistral.ai/v1/chat/completions";
 
@@ -598,4 +599,83 @@ export async function solveLexgramItem(stem: string, options: string[]): Promise
     ],
     0,
   );
+}
+
+// ---- Objectif B1 : examen blanc ТРКИ-1 (speaking, M2) ---------------------------
+
+/** Génère un item speaking brut (non validé) à partir d'un prompt déjà construit — même
+ * principe qu'un item lexgram (un appel = un item). */
+export async function generateSpeakingItem(systemPrompt: string, userPrompt: string): Promise<unknown> {
+  return chatJson<unknown>(
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    0.85,
+  );
+}
+
+/** Note le transcript ASR d'une réponse orale (§7.3 du spec) — même grille que письмo (M4) plus
+ * `fluency` estimée depuis les marqueurs temporels de l'ASR (débit, silence). Le transcript
+ * peut contenir des artefacts de reconnaissance vocale : le rater est explicitement instruit
+ * d'être tolérant dessus et de se concentrer sur la grammaire/le lexique/la réalisation de la
+ * tâche du candidat, pas la fidélité de la transcription. */
+export async function gradeSpeaking(
+  payload: { instructions: string; supportText?: string; stimuli?: string[] },
+  transcript: string,
+  fluency: { durationSec: number; wordCount: number },
+): Promise<RaterFeedback> {
+  const sys =
+    "Tu es un examinateur officiel du test de russe ТРКИ-1. Tu évalues la transcription d'une " +
+    "réponse ORALE — tolère les artefacts probables de reconnaissance vocale (mots mal transcrits, " +
+    "ponctuation absente) et concentre-toi sur la grammaire, le lexique et la réalisation de la " +
+    "tâche du candidat. Réponds UNIQUEMENT en JSON valide, commentaires en français.";
+
+  const wpm = fluency.durationSec > 0 ? Math.round((fluency.wordCount / fluency.durationSec) * 60) : 0;
+  const user = [
+    `Consigne donnée au candidat : ${payload.instructions}`,
+    payload.supportText ? `Texte support fourni :\n${payload.supportText}` : "",
+    payload.stimuli?.length
+      ? `Répliques/situations proposées :\n${payload.stimuli.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
+      : "",
+    "",
+    "Transcription de la réponse orale du candidat :",
+    transcript.trim() || "(aucune réponse détectée par la reconnaissance vocale)",
+    "",
+    `Débit approximatif : ${wpm} mots/minute (${fluency.wordCount} mots en ${fluency.durationSec}s).`,
+    "",
+    "Évalue et renvoie un objet JSON avec EXACTEMENT ces clés :",
+    `{ "scores": { "realisation": entier 0-5, "grammar": entier 0-5, "lexis": entier 0-5, "fluency": entier 0-5, "coherence": entier 0-5 },`,
+    `  "errors": [ { "span": string (extrait fautif), "type": string, "correction": string, "explanationFr": string } ] (0 à 6 erreurs les plus significatives),`,
+    `  "comment": string (2-3 phrases de retour global en français) }`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const raw = await chatJson<Partial<RaterFeedback>>([
+    { role: "system", content: sys },
+    { role: "user", content: user },
+  ]);
+  return normalizeRaterFeedback(raw);
+}
+
+function normalizeRaterFeedback(raw: Partial<RaterFeedback>): RaterFeedback {
+  const scores: Record<string, number> = {};
+  if (raw.scores && typeof raw.scores === "object") {
+    for (const [k, v] of Object.entries(raw.scores)) {
+      scores[k] = Math.max(0, Math.min(5, Math.round(Number(v ?? 0))));
+    }
+  }
+  return {
+    scores,
+    errors: Array.isArray(raw.errors)
+      ? raw.errors.slice(0, 10).map((e) => ({
+          span: String(e?.span ?? ""),
+          type: String(e?.type ?? ""),
+          correction: String(e?.correction ?? ""),
+          explanationFr: String(e?.explanationFr ?? ""),
+        }))
+      : [],
+    comment: raw.comment ? String(raw.comment) : undefined,
+  };
 }

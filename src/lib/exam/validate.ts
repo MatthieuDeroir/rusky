@@ -49,14 +49,19 @@ function normalizeYo(text: string): string {
   return text.replace(/Ё/g, "Е").replace(/ё/g, "е");
 }
 
-async function passLexicon(payload: LexgramPayload, userId?: string): Promise<ValidationStep> {
+/** Mots hors minimum B1 dans un texte libre — cœur de la passe lexicale, factorisé pour être
+ * réutilisé par tout sous-test générant du texte (lexgram/passe 4 ici, speaking/writing). Ne
+ * regarde que les mots de plus de 2 lettres, connus du dictionnaire mais ni B1 ni déjà dans le
+ * pokédex de l'utilisateur (un mot totalement hors dictionnaire — nom propre, particule — est
+ * toléré d'office : on ne peut rien en dire). */
+export async function outOfScopeWords(text: string, userId?: string): Promise<string[]> {
   const words = new Set(
-    normalizeBare(payload.stem)
+    normalizeBare(text)
       .replace(/[.,!?;:"«»()___]/g, " ")
       .split(/\s+/)
       .filter((w) => w.length > 2),
   );
-  if (words.size === 0) return { pass: 4, name: "lexique", ok: true };
+  if (words.size === 0) return [];
 
   const bares = [...words];
   const inDictionary = await prisma.dictionaryEntry.findMany({
@@ -89,12 +94,16 @@ async function passLexicon(payload: LexgramPayload, userId?: string): Promise<Va
     userPokedex = new Set(encountered.map((e) => e.entry?.bare).filter((b): b is string => !!b));
   }
 
-  const outOfScope = bares.filter((b) => {
+  return bares.filter((b) => {
     if (known.get(b)) return false; // dans le minimum B1
     if (userPokedex.has(b)) return false; // déjà dans le pokédex de l'utilisateur
     if (!known.has(b)) return false; // mot hors dictionnaire (nom propre, particule…) — toléré
     return true; // connu du dictionnaire mais ni B1 ni pokédex → hors scope B1
   });
+}
+
+async function passLexicon(payload: LexgramPayload, userId?: string): Promise<ValidationStep> {
+  const outOfScope = await outOfScopeWords(payload.stem, userId);
 
   // Tolérance d'un mot hors minimum B1 par phrase : un LLM ne peut pas connaître exactement la
   // frontière d'une liste curatée de 2500 mots (aucune liste ne lui est transmise, juste une

@@ -3,6 +3,20 @@
 Une ligne par session de travail, jamais réécrite rétroactivement. Voir le plan complet à
 `/home/mderoir/.claude/plans/robust-yawning-plum.md`.
 
+## 2026-08-24 (M2 говорение)
+
+- M2 construit de bout en bout : blueprint (4 typeId), prompts, génération, validation 4 passes,
+  rater (`gradeSpeaking`), ASR (Web Speech API, réutilise `src/lib/speech.ts`), passation dédiée
+  (préparation → enregistrement chronométrés → retour du rater), scoring fractionnaire
+  (`TrkiResponse.pointsAwarded`, migration locale + Turso), poids par tâche non uniforme
+  (`Slot.points`, généralisation qui servira aussi à M4 writing).
+- Génération vérifiée en prod : 4/4 items valides au premier passage (smoke test réel).
+- Rater vérifié en prod : transcript fabriqué avec fautes réalistes → retour cohérent, erreurs
+  correctement identifiées et corrigées (smoke test réel).
+- Pas testé : le cycle complet createPaper → passation réelle (le `after()` de génération a
+  besoin d'un contexte de requête Next.js, donc pas testable en script) — à confirmer par un
+  vrai sujet Говорение créé en prod, comme pour M1.
+
 ## 2026-08-24
 
 - Plan complet M1→M6 approuvé (hub `/objectif-b1`, KPI exhaustifs, carnet d'erreurs, IA de
@@ -80,4 +94,4 @@ Retour utilisateur après premier usage réel : le jour avançait dès que les m
   `/vocabulaire` (Collection scoped B1), mode libre B1 (`b1Only` sur `getPracticeCardAction`).
 - KPI (`src/lib/exam/kpi.ts`), carnet d'erreurs, `recommendB1Focus`.
 - Notifications de rappel (§O) — maintenant débloqué (§L existe).
-- M2 (`speaking`, remonté), M3 (`reading`), M4 (`writing`), M5 (`listening`), M6 (banking/partial).
+- M3 (`reading`), M4 (`writing`), M5 (`listening`), M6 (banking/partial).

@@ -41,9 +41,12 @@ export interface WritingSpeakingPayload {
   instructions: string;
   supportText?: string;
   intentions?: string[];
+  /** Répliques (reactive-dialogue) ou situations (initiative-dialogue) — une réaction par entrée. */
+  stimuli?: string[];
 }
 
-/** Sortie du rater (M3/M5) pour un item de production libre, stockée dans TrkiResponse.feedback. */
+/** Sortie du rater (M2 speaking / M4 writing) pour un item de production libre, stockée dans
+ * TrkiResponse.feedback. */
 export interface RaterFeedback {
   scores: Record<string, number>; // par critère de grille (grammar, lexis, ...)
   errors: { span: string; type: string; correction: string; explanationFr: string }[];
@@ -56,4 +59,8 @@ export interface Slot {
   targetId: string;
   topic: string;
   distractorClasses?: DistractorClass[];
+  /** Points de cet item précis, quand ils ne sont pas uniformes au sein du sous-test (ex.
+   * speaking/writing : les tâches n'ont pas toutes le même poids). Absent = utilise
+   * TRKI1_CONFIG.subtests[subtest].pointsPerItem (§A.2). */
+  points?: number;
 }

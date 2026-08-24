@@ -14,7 +14,7 @@ import { SUBTEST_LABELS, type SubtestCode } from "@/lib/exam/config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-const AVAILABLE_SUBTESTS: SubtestCode[] = ["lexgram"]; // les autres arrivent M2-M5
+const AVAILABLE_SUBTESTS: SubtestCode[] = ["lexgram", "speaking"]; // reading/writing/listening arrivent M3-M5
 
 const STATUS_LABEL: Record<string, string> = {
   PENDING: "En attente…",

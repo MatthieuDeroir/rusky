@@ -67,7 +67,8 @@ export function ExamResults({ data }: { data: ResultsData }) {
             <li key={i} className="flex items-start justify-between gap-3 rounded-xl bg-white/5 px-4 py-2">
               <span className="text-foreground/70">{t.stem}</span>
               <Badge variant={t.correct ? "default" : "secondary"} className="shrink-0">
-                {t.correct ? "✓" : "✗"} {t.targetId}
+                {t.pointsAwarded !== null ? `${t.pointsAwarded}/${t.maxPoints} pts` : t.correct ? "✓" : "✗"}{" "}
+                {t.targetId}
               </Badge>
             </li>
           ))}

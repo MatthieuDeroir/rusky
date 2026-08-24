@@ -7,7 +7,7 @@ définition complète, et `docs/adr/0006-bareme-officiel-trki1.md` pour le barè
 
 | Sous-test | Max pts | Seuil 66% | Plancher 60% | Poids | Statut |
 |---|---|---|---|---|---|
-| Говорение | 170 | 112 | 102 | 25,2 % | Pas construit (M2) |
+| Говорение | 170 | 112 | 102 | 25,2 % | ✅ construit (M2) — 4/4 typeId |
 | Лексика · Грамматика | 165 | 109 | 99 | 24,4 % | En cours (M1) |
 | Чтение | 140 | 92 | 84 | 20,7 % | Pas construit (M3) |
 | Аудирование | 120 | 79 | 72 | 17,8 % | Pas construit (M5) |
@@ -42,8 +42,36 @@ un par un, jamais en lot.
 
 1. Schéma (zod) — ✅
 2. Alphabet — ✅
-3. Structure QCM — ✅
+3. Structure QCM — ✅ (+ contrôle générique anti-doublon : rejette si le texte de la bonne
+   réponse réapparaît tel quel ailleurs dans la phrase, observé en prod sur желать)
 4. Lexique (allowlist B1 réelle, `data/B1/lexique_b1.json`) — ✅
 5. Cible (heuristique par typeId — actuellement spécifique à `case-government-verb`, à
    généraliser au fur et à mesure des typeId suivants) — ✅ (1/16 typeId)
 6. Contre-résolution (solveur Mistral, température 0) — ✅
+
+## `speaking` — 4 typeId, 170 pts (§F du plan, M2)
+
+| `typeId` | Tâche | Points | Statut |
+|---|---|---|---|
+| `speaking.reactive-dialogue` | Réagir à 5 répliques enregistrées | 42 | ✅ construit |
+| `speaking.initiative-dialogue` | Initier le dialogue dans 5 situations | 42 | ✅ construit |
+| `speaking.situational-dialogue` | Dialogue suivi (jeu de rôle) | 43 | ✅ construit |
+| `speaking.monologue` | Monologue 10-12 phrases sur texte-support | 43 | ✅ construit |
+
+Répartition des points par tâche estimée (pas de barème officiel par tâche trouvé dans le spec
+extrait) — voir commentaire dans `blueprints/speaking-v1.ts`. Chronométrage (prep/réponse) par
+tâche également estimé, même remarque.
+
+**Validation — 4 passes** (`validate-speaking.ts`, génériques à tout `speaking.*`) : schéma,
+alphabet, structure (nombre de stimuli / longueur texte-support selon typeId), lexique (tolérance
+proportionnelle à la longueur du texte, pas fixe comme lexgram). Pas de contre-résolution — la
+production est libre, notée par le rater à la réponse (`gradeSpeaking`, `src/lib/mistral.ts`),
+pas à la génération.
+
+**ASR** : Web Speech API (`src/lib/exam/asr/`, ADR 0005), réutilise le wrapper de dictée déjà en
+place (`src/lib/speech.ts`). Repli texte manuel si le navigateur ne supporte pas la reconnaissance
+vocale.
+
+**Scoring** : `TrkiResponse.pointsAwarded` (fractionnaire, migration `20260824185803`) — une tâche
+de production libre n'est pas 0/1 comme un QCM. `finishAttemptAction` utilise `pointsAwarded` en
+priorité, retombe sur `correct ? item.points : 0` pour les QCM (`pointsAwarded` reste `null`).

@@ -4,6 +4,26 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added (M2 говорение, §F du plan)
+- Moteur speaking complet : blueprint (`speaking-v1.ts`, 4 typeId — reactive/initiative-dialogue,
+  situational-dialogue, monologue), prompts + few-shot par typeId, génération Mistral,
+  validation 4 passes (`validate-speaking.ts` — pas de contre-résolution, production libre notée
+  au moment de la réponse, pas de la génération), rater (`gradeSpeaking`, grille réalisation/
+  grammaire/lexique/fluidité/cohérence + erreurs annotées).
+- ASR : Web Speech API (`src/lib/exam/asr/`, ADR 0005), réutilise le wrapper de dictée déjà en
+  place (`src/lib/speech.ts`) — repli texte manuel si non supporté par le navigateur.
+- Passation dédiée (`SpeakingPassation`) : préparation chronométrée → enregistrement chronométré
+  (auto-stop) → transcript soumis au rater → retour affiché (score/5 par critère, erreurs
+  annotées) avant la tâche suivante.
+- `TrkiResponse.pointsAwarded` (migration, local + Turso) : score fractionnaire pour la production
+  libre — une tâche parlée/écrite n'est pas 0/1 comme un QCM. `Slot.points` (généralisation) permet
+  un poids par tâche non uniforme au sein d'un sous-test (42/42/43/43 pour les 4 tâches speaking,
+  contre 1 pt/item uniforme en lexgram).
+- Sujet d'examen "Говорение" disponible à la création (`/objectif-b1/examens`).
+- Vérifié en prod avant push : génération (4/4 items valides au premier passage) et notation
+  (transcript fabriqué avec fautes réalistes, retour cohérent et actionnable) testées séparément
+  via smoke tests réels (`scripts/smoke-test-speaking.ts`, `scripts/smoke-test-grade-speaking.ts`).
+
 ### Fixed (passation, retour utilisateur)
 - Matrice de réponses lexgram déplacée tout en bas de la page (fallait scroller après chaque item
   pour y répondre) → réponse reportée juste sous chaque item (toujours une rangée séparée, pas un
@@ -102,3 +122,5 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/).
   `/admin/health`, en plus des items validés/quarantinés (local + Turso).
 - `20260824140847_add_trki_paper_progress` — `TrkiPaper.totalSlots`/`resolvedSlots` pour la barre
   de progression (local + Turso).
+- `20260824185803_add_trki_response_points_awarded` — `TrkiResponse.pointsAwarded` pour le score
+  fractionnaire de la production libre (M2 speaking, M4 writing plus tard) (local + Turso).
