@@ -1407,6 +1407,9 @@ export async function getVocabCardAction(
   exclude?: string,
   level?: number,
   mistakesOnly?: boolean,
+  /** Restreint le tirage à cet ensemble précis d'entrées (ex. cohorte du parcours B1, §L) —
+   * sinon toute la collection rencontrée est éligible, comme avant. */
+  entryIds?: number[],
 ): Promise<VocabCard | "empty"> {
   const userId = await currentUserId();
   const enc = await prisma.encounter.findMany({
@@ -1414,7 +1417,11 @@ export async function getVocabCardAction(
     select: { entryId: true },
     distinct: ["entryId"],
   });
-  const ids = enc.map((e) => e.entryId!);
+  let ids = enc.map((e) => e.entryId!);
+  if (entryIds) {
+    const restrict = new Set(entryIds);
+    ids = ids.filter((id) => restrict.has(id));
+  }
   if (ids.length === 0) return "empty";
 
   // An entry with no FR gloss yet is still eligible: the AI fills it in below, from the

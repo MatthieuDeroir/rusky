@@ -7,9 +7,13 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
+import { addEncounterAction } from "@/app/actions";
+import type { XpAward } from "@/lib/xp";
 import { createPaper } from "@/lib/exam/generate";
 import { isPassed, TRKI1_CONFIG, type PassResult, type SubtestCode } from "@/lib/exam/config";
 import type { LexgramPayload } from "@/lib/exam/types";
+import { getTodayCohort, getYesterdayEntryIds, getMixEntryIds } from "@/lib/exam/b1-curriculum";
+import { WORD_TYPE_LABELS, type WordType } from "@/lib/grammar";
 
 export interface PaperStatus {
   paperId: number;
@@ -245,4 +249,91 @@ export async function getAttemptResultsAction(attemptId: number): Promise<Result
       stem: (JSON.parse(r.item.payload) as LexgramPayload).stem,
     })),
   };
+}
+
+// ---- Parcours vocabulaire quotidien (§L) -------------------------------------------
+
+export interface B1VocabWord {
+  entryId: number;
+  accented: string;
+  type: WordType;
+  typeLabel: string;
+  translationsFr: string | null;
+  /** true = déjà "vu" (Encounter posé) — le mot est passé côté collection/SRS. */
+  encountered: boolean;
+}
+
+export interface B1TodayCohort {
+  dayIndex: number;
+  totalDays: number;
+  words: B1VocabWord[];
+}
+
+async function loadB1Words(userId: string, entryIds: number[]): Promise<B1VocabWord[]> {
+  if (entryIds.length === 0) return [];
+  const [entries, encountered] = await Promise.all([
+    prisma.dictionaryEntry.findMany({
+      where: { id: { in: entryIds } },
+      select: { id: true, accented: true, type: true, translationsFr: true },
+    }),
+    prisma.encounter.findMany({
+      where: { userId, entryId: { in: entryIds } },
+      select: { entryId: true },
+      distinct: ["entryId"],
+    }),
+  ]);
+  const encounteredIds = new Set(encountered.map((e) => e.entryId));
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  // Garde l'ordre de la cohorte (familles groupées ensemble), pas l'ordre de retour de la requête.
+  return entryIds
+    .map((id) => byId.get(id))
+    .filter((e): e is NonNullable<typeof e> => !!e)
+    .map((e) => ({
+      entryId: e.id,
+      accented: e.accented,
+      type: e.type as WordType,
+      typeLabel: WORD_TYPE_LABELS[e.type as WordType],
+      translationsFr: e.translationsFr,
+      encountered: encounteredIds.has(e.id),
+    }));
+}
+
+/** Cohorte du jour courant (avance automatiquement au jour suivant si la précédente est déjà
+ * complète) — utilisée par l'onglet "Nouveaux" de /objectif-b1/reviser. */
+export async function getB1TodayCohortAction(): Promise<B1TodayCohort | null> {
+  const userId = await currentUserId();
+  const cohort = await getTodayCohort(userId);
+  if (!cohort) return null;
+  const words = await loadB1Words(userId, cohort.entryIds);
+  return { dayIndex: cohort.dayIndex, totalDays: cohort.totalDays, words };
+}
+
+/** Ids de la cohorte de la veille — alimente VocabCard (entryIds) côté onglet "Hier". */
+export async function getB1YesterdayEntryIdsAction(): Promise<number[]> {
+  const userId = await currentUserId();
+  return (await getYesterdayEntryIds(userId)) ?? [];
+}
+
+/** Union de tous les jours avant hier — alimente VocabCard (entryIds) côté onglet "Mélange". */
+export async function getB1MixEntryIdsAction(): Promise<number[]> {
+  const userId = await currentUserId();
+  return getMixEntryIds(userId);
+}
+
+/** Marque un mot du jour comme "vu" : crée son premier Encounter (le fait entrer dans la
+ * collection/le SRS), exactement comme une recherche dans /add — juste depuis le parcours B1. */
+export async function introduceB1WordAction(entryId: number): Promise<{ xp: XpAward }> {
+  const entry = await prisma.dictionaryEntry.findUnique({
+    where: { id: entryId },
+    select: { accented: true },
+  });
+  if (!entry) throw new Error("Mot introuvable.");
+  const { xp } = await addEncounterAction({
+    entryId,
+    rawInput: entry.accented,
+    matchedFormKey: null,
+    source: "objectif-b1",
+  });
+  revalidatePath("/objectif-b1/reviser");
+  return { xp };
 }

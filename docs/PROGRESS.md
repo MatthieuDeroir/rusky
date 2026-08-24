@@ -34,10 +34,30 @@ Une ligne par session de travail, jamais réécrite rétroactivement. Voir le pl
   partenaire aspectuel, backoff 429, concurrence 4→2) et revérifié en prod avant push — voir
   CHANGELOG.
 
+## 2026-08-24 (parcours vocabulaire quotidien, §L)
+
+- `src/lib/exam/b1-curriculum.ts` : cohortes de 20 mots/jour depuis les 2319 `DictionaryEntry`
+  `inB1Minimum` — familles = mots partageant le même `bare` (homonymes, jamais coupés entre deux
+  jours), ordre entre familles pseudo-aléatoire seedé par utilisateur (`seededShuffle`/`makeRng`,
+  pas alphabétique). `B1VocabDay` alimenté paresseusement (jour suivant créé quand le jour courant
+  est complet — chaque mot a au moins un `Encounter`). Vérifié en prod : 2319 mots → 117 jours,
+  premier jour = 20 familles distinctes, aucune coupure de famille.
+- `/objectif-b1/reviser` (3 onglets) : **Nouveaux** — nouveau composant `B1NewWords` (aucune
+  action existante ne peut servir un mot jamais rencontré, toutes exigent un `Encounter`
+  préalable) : flashcard mot+traduction, "j'ai vu ce mot" pose l'Encounter via la même primitive
+  que `/add` (`addEncounterAction`). **Hier** / **Mélange** — `VocabCard` existant, étendu d'un
+  filtre `entryIds` optionnel sur `getVocabCardAction`, sans nouveau composant.
+- Écart assumé par rapport au plan §L : la notion de "famille via `subentries[]`" du JSON n'est
+  pas implémentée telle quelle — `data/B1/lexique_b1.json` est gitignored (droit d'auteur) donc
+  absent en prod, et les subentries sont des locutions sans `DictionaryEntry`/paradigme propre
+  (non pratiquables). Famille = homonymes de même `bare`, seule notion réellement disponible en
+  base au runtime.
+
 ### Reste à faire (voir plan §Ordre de construction)
 
 - 15 `typeId` lexgram restants (un par un, avec relecture).
 - Hub : tableau de bord complet (couverture, tuile du jour, tendances, recommandation IA),
-  `/vocabulaire`, `/reviser` (b1Only + parcours quotidien 20 mots/jour par famille lexicale).
+  `/vocabulaire` (Collection scoped B1), mode libre B1 (`b1Only` sur `getPracticeCardAction`).
 - KPI (`src/lib/exam/kpi.ts`), carnet d'erreurs, `recommendB1Focus`.
+- Notifications de rappel (§O) — maintenant débloqué (§L existe).
 - M2 (`speaking`, remonté), M3 (`reading`), M4 (`writing`), M5 (`listening`), M6 (banking/partial).

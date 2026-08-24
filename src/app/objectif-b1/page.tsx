@@ -17,6 +17,16 @@ export default function ObjectifB1Page() {
         </p>
       </div>
       <div className="glass-strong rounded-3xl p-6">
+        <h2 className="text-lg font-semibold">Vocabulaire du jour</h2>
+        <p className="mt-1 text-sm text-foreground/60">
+          20 nouveaux mots par jour, tirés du minimum lexical B1, puis révision d’hier et mélange.
+        </p>
+        <Link href="/objectif-b1/reviser" className="mt-3 inline-block text-primary hover:underline">
+          Réviser mon vocabulaire B1 →
+        </Link>
+      </div>
+
+      <div className="glass-strong rounded-3xl p-6">
         <h2 className="text-lg font-semibold">Examens blancs</h2>
         <p className="mt-1 text-sm text-foreground/60">
           Génère et passe un sujet ТРКИ-1 (Лексика · Грамматика pour l’instant).

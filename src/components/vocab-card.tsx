@@ -32,11 +32,17 @@ function ringClass(result: PracticeResult | null): string {
 export function VocabCard({
   level: initialLevel,
   mistakesOnly,
+  entryIds,
+  emptyMessage,
 }: {
   /** Niveau initial (venu de la Collection via l'URL) — reste modifiable ensuite dans la carte. */
   level?: number;
   /** true = ne piocher que dans les mots dont la dernière tentative (ce sens) était fausse. */
   mistakesOnly?: boolean;
+  /** Restreint le tirage à ces entrées précises (ex. cohorte du parcours B1, §L). */
+  entryIds?: number[];
+  /** Message affiché à la place du texte générique quand il n'y a rien à réviser. */
+  emptyMessage?: string;
 }) {
   const [direction, setDirection] = useState<VocabDirection>("ru-fr");
   const [level, setLevel] = useState<number | undefined>(initialLevel);
@@ -53,7 +59,7 @@ export function VocabCard({
   const load = useCallback(
     (exclude?: string) => {
       startLoad(async () => {
-        const c = await getVocabCardAction(direction, exclude, level, mistakesOnly);
+        const c = await getVocabCardAction(direction, exclude, level, mistakesOnly, entryIds);
         cardGen.current += 1;
         setCard(c);
         setAnswer("");
@@ -61,7 +67,7 @@ export function VocabCard({
         setTimeout(() => answerRef.current?.focus(), 0);
       });
     },
-    [direction, level, mistakesOnly],
+    [direction, level, mistakesOnly, entryIds],
   );
 
   useEffect(() => {
@@ -133,14 +139,15 @@ export function VocabCard({
         <LevelFilter value={level} onChange={setLevel} />
         <div className="glass-strong rounded-3xl p-10 text-center">
           <h2 className="text-xl font-semibold">
-            {mistakesOnly ? "Aucune erreur en attente 🎉" : "Rien à traduire pour l’instant"}
+            {emptyMessage ? "Rien pour l’instant" : mistakesOnly ? "Aucune erreur en attente 🎉" : "Rien à traduire pour l’instant"}
           </h2>
           <p className="mt-2 text-foreground/65">
-            {mistakesOnly
-              ? "Tous tes derniers essais dans ce sens sont réussis — reviens ici après une session de Traduire."
-              : "Ajoute des mots à ta collection (avec une traduction française) pour t’entraîner."}
+            {emptyMessage ??
+              (mistakesOnly
+                ? "Tous tes derniers essais dans ce sens sont réussis — reviens ici après une session de Traduire."
+                : "Ajoute des mots à ta collection (avec une traduction française) pour t’entraîner.")}
           </p>
-          {!mistakesOnly && (
+          {!mistakesOnly && !entryIds && (
             <Button render={<Link href="/add" />} nativeButton={false} className="mt-6">
               Ajouter un mot
             </Button>

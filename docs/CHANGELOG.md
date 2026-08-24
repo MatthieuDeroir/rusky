@@ -44,6 +44,15 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/).
   tirés) : plus aucun rejet passe 4 ; les rejets restants sont des erreurs de génération
   ponctuelles (schéma/structure/cible) déjà couvertes par le mécanisme de retry existant.
 
+### Added (parcours vocabulaire quotidien, §L)
+- `/objectif-b1/reviser` : parcours quotidien de 20 mots/jour tirés du minimum lexical B1 —
+  onglets Nouveaux (découverte, nouveau composant `B1NewWords`), Hier et Mélange (révision,
+  `VocabCard` existant + nouveau filtre `entryIds`). `B1VocabDay` alimenté paresseusement,
+  cohortes ordonnées par tirage pseudo-aléatoire seedé (pas alphabétique), familles (homonymes de
+  même `bare`) jamais coupées entre deux jours.
+- `getVocabCardAction` : nouveau paramètre optionnel `entryIds` pour restreindre le tirage à un
+  sous-ensemble précis de la collection (utilisé par le parcours B1, réutilisable ailleurs).
+
 ### Added (suite)
 - Passes de "top-up" (`TOP_UP_ROUNDS = 2`) dans `runGeneration` : les slots encore non résolus
   après le premier passage (retries épuisés + rien en banque) sont retentés jusqu'à 2 fois de
