@@ -186,14 +186,30 @@ export async function validateLexgramItem(
   const correctCount = normalized.options.filter((o) => o.class === "correct").length;
   const lengths = texts.map((t) => t.length);
   const lengthRatio = Math.max(...lengths) / Math.max(1, Math.min(...lengths));
-  const structureOk = distinct && correctCount === 1 && lengthRatio <= 3;
+
+  // Le mot de la bonne réponse ne doit pas déjà apparaître, tel quel, ailleurs dans la phrase
+  // (hors trou) — sinon la phrase assemblée le répète deux fois de suite. Observé en prod :
+  // "принято желать ___ счастья и здоровья" avec "счастья" marqué correct → une fois inséré dans
+  // le trou, la phrase relit "желать счастья счастья и здоровья". Aucune des 6 passes de forme
+  // (grammaticales) ne détecte ce doublon sémantique — seule une comparaison texte le peut.
+  const correctOption = normalized.options.find((o) => o.class === "correct");
+  const stemOutsideBlank = normalizeBare(normalized.stem.replace(/___/g, " "));
+  const stemTokens = new Set(stemOutsideBlank.split(/[^а-яё]+/).filter((w) => w.length >= 3));
+  const correctTokens = correctOption
+    ? normalizeBare(correctOption.text).split(/[^а-яё]+/).filter((w) => w.length >= 3)
+    : [];
+  const duplicatesStem = correctTokens.some((w) => stemTokens.has(w));
+
+  const structureOk = distinct && correctCount === 1 && lengthRatio <= 3 && !duplicatesStem;
   steps.push({
     pass: 3,
     name: "structure QCM",
     ok: structureOk,
     detail: structureOk
       ? undefined
-      : `distinct=${distinct} correct=${correctCount} lengthRatio=${lengthRatio.toFixed(1)}`,
+      : duplicatesStem
+        ? `la bonne réponse (« ${correctOption?.text} ») apparaît déjà dans la phrase — la relecture donnerait un mot répété`
+        : `distinct=${distinct} correct=${correctCount} lengthRatio=${lengthRatio.toFixed(1)}`,
   });
   if (!structureOk) return { ok: false, quarantined: false, steps };
 

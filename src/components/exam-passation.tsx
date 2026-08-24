@@ -10,7 +10,6 @@ import {
 } from "@/app/objectif-b1/actions";
 import { Button } from "@/components/ui/button";
 import { Progress, ProgressTrack, ProgressIndicator } from "@/components/ui/progress";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const LETTERS = ["A", "B", "C", "D"];
 
@@ -83,52 +82,30 @@ export function ExamPassation({ data, paperId }: { data: PassationData; paperId:
                 </li>
               ))}
             </ul>
+            {/* Report la réponse dans une rangée séparée, pas un clic direct sur l'énoncé —
+                comme la vraie matrice papier — mais juste sous l'item pour ne pas avoir à
+                scroller jusqu'en bas de la page à chaque réponse. */}
+            <div className="mt-4 flex items-center gap-2 border-t border-white/10 pt-4">
+              <span className="mr-1 text-xs uppercase tracking-wide text-foreground/40">
+                Réponse
+              </span>
+              {LETTERS.map((l, idx) => (
+                <button
+                  key={l}
+                  type="button"
+                  onClick={() => choose(item.id, idx)}
+                  className={`h-9 w-9 rounded-full border text-sm font-medium transition-colors ${
+                    answers[item.id] === idx
+                      ? "border-primary bg-primary/40 text-foreground"
+                      : "border-white/15 text-foreground/50 hover:border-white/30"
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
           </div>
         ))}
-      </div>
-
-      <div className="glass-strong rounded-3xl p-6">
-        <h2 className="text-lg font-semibold">Matrice de réponses</h2>
-        <p className="mt-1 text-sm text-foreground/60">
-          Reporte ta réponse ici pour chaque item, comme à l’examen réel — pas de clic direct sur
-          l’énoncé.
-        </p>
-        <div className="mt-4 overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Item</TableHead>
-                {LETTERS.map((l) => (
-                  <TableHead key={l} className="text-center">
-                    {l}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.items.map((item, i) => (
-                <TableRow key={item.id}>
-                  <TableCell>{i + 1}</TableCell>
-                  {LETTERS.map((l, idx) => (
-                    <TableCell key={l} className="text-center">
-                      <button
-                        type="button"
-                        onClick={() => choose(item.id, idx)}
-                        className={`h-8 w-8 rounded-full border text-sm transition-colors ${
-                          answers[item.id] === idx
-                            ? "border-primary bg-primary/40 text-foreground"
-                            : "border-white/15 text-foreground/50 hover:border-white/30"
-                        }`}
-                      >
-                        {l}
-                      </button>
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
       </div>
 
       <Button size="lg" disabled={finishing} onClick={finish}>

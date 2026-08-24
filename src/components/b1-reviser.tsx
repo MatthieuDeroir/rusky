@@ -1,33 +1,46 @@
 "use client";
 
-import { useState } from "react";
-import { B1NewWords } from "@/components/b1-new-words";
+import { useCallback, useState } from "react";
+import { B1MasteryPool } from "@/components/b1-mastery-pool";
 import { VocabCard } from "@/components/vocab-card";
-import type { B1TodayCohort } from "@/app/objectif-b1/actions";
+import { getB1PoolsAction, type B1Pools } from "@/app/objectif-b1/actions";
 
 type Tab = "nouveaux" | "hier" | "melange";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "nouveaux", label: "Nouveaux" },
-  { key: "hier", label: "Hier" },
-  { key: "melange", label: "Mélange" },
-];
-
-export function B1Reviser({
-  cohort,
-  yesterdayIds,
-  mixIds,
-}: {
-  cohort: B1TodayCohort | null;
-  yesterdayIds: number[];
-  mixIds: number[];
-}) {
+export function B1Reviser({ initial }: { initial: B1Pools | null }) {
+  const [pools, setPools] = useState(initial);
   const [tab, setTab] = useState<Tab>("nouveaux");
+
+  // Un lot validé peut débloquer "hier"/"mélange" (ou le jour suivant côté "nouveaux") —
+  // resynchro depuis le serveur plutôt que de deviner l'état localement.
+  const refresh = useCallback(() => {
+    getB1PoolsAction().then(setPools);
+  }, []);
+
+  if (!pools) {
+    return (
+      <div className="glass-strong rounded-3xl p-10 text-center">
+        <h2 className="text-xl font-semibold">Pas encore de vocabulaire B1</h2>
+        <p className="mt-2 text-foreground/65">
+          Le minimum B1 n’a pas encore été importé en base.
+        </p>
+      </div>
+    );
+  }
+
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "nouveaux", label: "Nouveaux" },
+    { key: "hier", label: "Hier" },
+    { key: "melange", label: "Mélange" },
+  ];
 
   return (
     <div className="space-y-6">
+      <p className="text-center text-xs text-foreground/40">
+        Jour {pools.scheduledDayIndex + 1} / {pools.totalDays}
+      </p>
       <div className="mx-auto flex w-fit gap-1 rounded-xl bg-white/5 p-1">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             type="button"
@@ -43,35 +56,38 @@ export function B1Reviser({
         ))}
       </div>
 
-      {tab === "nouveaux" &&
-        (cohort ? (
-          <B1NewWords cohort={cohort} />
+      {tab === "nouveaux" && (
+        <B1MasteryPool
+          key={`nouveaux-${pools.scheduledDayIndex}-${pools.nouveaux.toIntroduce.length}-${pools.nouveaux.toTest.length}`}
+          data={pools.nouveaux}
+          label="Nouveaux"
+          onValidated={refresh}
+        />
+      )}
+
+      {tab === "hier" &&
+        (pools.hier ? (
+          <B1MasteryPool
+            key={`hier-${pools.hier.toIntroduce.length}-${pools.hier.toTest.length}`}
+            data={pools.hier}
+            label="Hier"
+            onValidated={refresh}
+          />
         ) : (
           <div className="glass-strong rounded-3xl p-10 text-center">
-            <h2 className="text-xl font-semibold">Pas encore de vocabulaire B1</h2>
+            <h2 className="text-xl font-semibold">Rien à revoir pour l’instant</h2>
             <p className="mt-2 text-foreground/65">
-              Le minimum B1 n’a pas encore été importé en base.
+              Reviens ici demain, une fois que tu auras une première journée de mots derrière toi.
             </p>
           </div>
         ))}
 
-      {tab === "hier" && (
-        <VocabCard
-          entryIds={yesterdayIds}
-          emptyMessage={
-            yesterdayIds.length === 0
-              ? "Reviens ici demain, une fois que tu auras une première journée de mots derrière toi."
-              : "Tous les mots d’hier sont déjà à jour — reviens plus tard."
-          }
-        />
-      )}
-
       {tab === "melange" && (
         <VocabCard
-          entryIds={mixIds}
+          entryIds={pools.mixEntryIds}
           emptyMessage={
-            mixIds.length === 0
-              ? "Le mélange arrive une fois que tu as au moins deux journées de mots derrière toi."
+            pools.mixEntryIds.length === 0
+              ? "Le mélange arrive une fois que tu as validé au moins deux journées de mots."
               : "Tout est à jour dans le mélange pour l’instant — reviens plus tard."
           }
         />

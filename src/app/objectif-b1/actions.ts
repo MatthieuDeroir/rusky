@@ -12,7 +12,7 @@ import type { XpAward } from "@/lib/xp";
 import { createPaper } from "@/lib/exam/generate";
 import { isPassed, TRKI1_CONFIG, type PassResult, type SubtestCode } from "@/lib/exam/config";
 import type { LexgramPayload } from "@/lib/exam/types";
-import { getTodayCohort, getYesterdayEntryIds, getMixEntryIds } from "@/lib/exam/b1-curriculum";
+import { getB1State } from "@/lib/exam/b1-curriculum";
 import { WORD_TYPE_LABELS, type WordType } from "@/lib/grammar";
 
 export interface PaperStatus {
@@ -263,12 +263,6 @@ export interface B1VocabWord {
   encountered: boolean;
 }
 
-export interface B1TodayCohort {
-  dayIndex: number;
-  totalDays: number;
-  words: B1VocabWord[];
-}
-
 async function loadB1Words(userId: string, entryIds: number[]): Promise<B1VocabWord[]> {
   if (entryIds.length === 0) return [];
   const [entries, encountered] = await Promise.all([
@@ -298,26 +292,43 @@ async function loadB1Words(userId: string, entryIds: number[]): Promise<B1VocabW
     }));
 }
 
-/** Cohorte du jour courant (avance automatiquement au jour suivant si la précédente est déjà
- * complète) — utilisée par l'onglet "Nouveaux" de /objectif-b1/reviser. */
-export async function getB1TodayCohortAction(): Promise<B1TodayCohort | null> {
-  const userId = await currentUserId();
-  const cohort = await getTodayCohort(userId);
-  if (!cohort) return null;
-  const words = await loadB1Words(userId, cohort.entryIds);
-  return { dayIndex: cohort.dayIndex, totalDays: cohort.totalDays, words };
+export interface B1MasteryPoolData {
+  toIntroduce: B1VocabWord[];
+  toTest: B1VocabWord[];
 }
 
-/** Ids de la cohorte de la veille — alimente VocabCard (entryIds) côté onglet "Hier". */
-export async function getB1YesterdayEntryIdsAction(): Promise<number[]> {
-  const userId = await currentUserId();
-  return (await getYesterdayEntryIds(userId)) ?? [];
+export interface B1Pools {
+  scheduledDayIndex: number;
+  totalDays: number;
+  nouveaux: B1MasteryPoolData;
+  /** null quand il n'y a pas (encore) de jour "hier" distinct à retravailler. */
+  hier: B1MasteryPoolData | null;
+  /** Déjà maîtrisé, plus vieux que "hier" — pratique libre, sans fin (VocabCard existant). */
+  mixEntryIds: number[];
 }
 
-/** Union de tous les jours avant hier — alimente VocabCard (entryIds) côté onglet "Mélange". */
-export async function getB1MixEntryIdsAction(): Promise<number[]> {
+/** État complet du parcours (§L) : ce qui est dû aujourd'hui (+ retard éventuel accumulé), ce
+ * qui relève de "hier" (à retravailler une dernière fois), et ce qui est déjà acquis. Un mot
+ * n'est "acquis" que par un test de traduction réussi — jamais simplement "vu". */
+export async function getB1PoolsAction(): Promise<B1Pools | null> {
   const userId = await currentUserId();
-  return getMixEntryIds(userId);
+  const state = await getB1State(userId);
+  if (!state) return null;
+
+  const [nouveauxIntro, nouveauxTest, hierIntro, hierTest] = await Promise.all([
+    loadB1Words(userId, state.nouveauxToIntroduce),
+    loadB1Words(userId, state.nouveauxToTest),
+    loadB1Words(userId, state.hierToIntroduce),
+    loadB1Words(userId, state.hierToTest),
+  ]);
+
+  return {
+    scheduledDayIndex: state.scheduledDayIndex,
+    totalDays: state.totalDays,
+    nouveaux: { toIntroduce: nouveauxIntro, toTest: nouveauxTest },
+    hier: state.dayIndex === null ? null : { toIntroduce: hierIntro, toTest: hierTest },
+    mixEntryIds: state.mixEntryIds,
+  };
 }
 
 /** Marque un mot du jour comme "vu" : crée son premier Encounter (le fait entrer dans la

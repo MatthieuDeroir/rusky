@@ -4,6 +4,17 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed (passation, retour utilisateur)
+- Matrice de réponses lexgram déplacée tout en bas de la page (fallait scroller après chaque item
+  pour y répondre) → réponse reportée juste sous chaque item (toujours une rangée séparée, pas un
+  clic direct sur l'énoncé — l'esprit "matrice" de l'examen réel est conservé).
+- Passe 3 (structure QCM) : un item pouvait avoir sa bonne réponse déjà présente littéralement
+  dans la phrase (ex. "принято желать ___ счастья и здоровья" avec "счастья" marqué correct →
+  relecture "желать счастья счастья и здоровья", mot répété). Aucune des 6 passes ne le
+  détectait (toutes vérifient la grammaire, pas la duplication texte). Nouveau contrôle générique
+  (pas spécifique à `case-government-verb`) : rejette si le texte de la bonne réponse réapparaît
+  tel quel ailleurs dans la phrase.
+
 ### Added
 - Module Objectif B1 (`/objectif-b1`) — hub dédié à la préparation ТРКИ-1 : examens blancs,
   vocabulaire minimum B1, à terme suivi KPI/carnet d'erreurs/parcours quotidien.
@@ -43,6 +54,15 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/).
   concurrence lexgram réduite de 4 à 2 (`src/lib/exam/generate.ts`). Revérifié en prod (10 items
   tirés) : plus aucun rejet passe 4 ; les rejets restants sont des erreurs de génération
   ponctuelles (schéma/structure/cible) déjà couvertes par le mécanisme de retry existant.
+
+### Fixed (parcours vocabulaire quotidien, §L)
+- Un jour avançait dès que ses mots étaient "vus" (Encounter), sans être réellement testés.
+  "Maîtrisé" exige désormais une dernière tentative `vocab:ru-fr` correcte. Nouvelle boucle
+  carte → test → (ratés) rappel-carte → retest, jusqu'à un tour sans faute (`B1MasteryPool`,
+  remplace `B1NewWords`), appliquée à "Nouveaux" et "Hier".
+- Le calendrier avance désormais en jours civils réels depuis le premier jour (indépendamment de
+  l'activité) : les jours dus mais non maîtrisés s'accumulent (1 jour raté → 40 mots dus) au lieu
+  d'être sautés ou de tout bloquer.
 
 ### Added (parcours vocabulaire quotidien, §L)
 - `/objectif-b1/reviser` : parcours quotidien de 20 mots/jour tirés du minimum lexical B1 —

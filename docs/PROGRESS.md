@@ -34,7 +34,27 @@ Une ligne par session de travail, jamais réécrite rétroactivement. Voir le pl
   partenaire aspectuel, backoff 429, concurrence 4→2) et revérifié en prod avant push — voir
   CHANGELOG.
 
-## 2026-08-24 (parcours vocabulaire quotidien, §L)
+## 2026-08-24 (parcours vocabulaire quotidien, §L — révisé)
+
+Retour utilisateur après premier usage réel : le jour avançait dès que les mots étaient "vus"
+(Encounter posé par les flashcards), sans jamais être réellement testés — day 1 est passé en day
+2 alors que l'utilisateur n'avait fait que les cartes. Refonte de `b1-curriculum.ts` :
+- "Maîtrisé" = dernière tentative `vocab:ru-fr` correcte (pas juste un `Encounter`). Calculé à la
+  volée depuis `QuizAttempt`, aucun état "jour validé" mis en cache — rien ne peut rester figé.
+- Calendrier civil : `scheduledDayIndex` avance de 1 par jour civil écoulé depuis le tout premier
+  jour (`day0.introducedAt` comme epoch), indépendamment de l'activité de l'utilisateur. Les jours
+  dus mais non maîtrisés s'accumulent dans le pool "Nouveaux" (retard = 2 jours dus → 40 mots, au
+  lieu d'être sautés ou de tout bloquer indéfiniment).
+- Nouvelle boucle "carte → test → (si ratés) rappel-carte → retest" jusqu'à un tour sans faute
+  (`B1MasteryPool`, remplace `B1NewWords`), appliquée identiquement à "Nouveaux" et "Hier" ; le
+  jour "Hier" est distingué du reste du retard uniquement s'il a déjà été entamé (sinon il reste
+  fondu dans "Nouveaux", pas de sens à retester sans avoir vu les cartes). "Mélange" reste
+  infini/sans validation (`VocabCard` existant, inchangé).
+- Vérifié en prod : le jour 0 de l'utilisateur (déjà "vu" via l'ancien bug, jamais testé) revient
+  bien en pool "à tester" (pas "à introduire"), le jour 1 fantôme créé par l'ancien bug est ignoré
+  puisqu'au-delà du `scheduledDayIndex` réel (0, calendaire).
+
+## 2026-08-24 (parcours vocabulaire quotidien, §L — premier jet)
 
 - `src/lib/exam/b1-curriculum.ts` : cohortes de 20 mots/jour depuis les 2319 `DictionaryEntry`
   `inB1Minimum` — familles = mots partageant le même `bare` (homonymes, jamais coupés entre deux

@@ -1,18 +1,19 @@
-// Parcours vocabulaire quotidien (§L du plan) : cohortes de 20 mots/jour tirées du minimum B1
-// (DictionaryEntry.inB1Minimum), regroupées par "famille" (mots partageant le même bare —
-// homonymes/plusieurs classes grammaticales pour une même forme, jamais coupés entre deux jours)
-// et ordonnées par un tirage pseudo-aléatoire seedé sur l'utilisateur (pas alphabétique : l'ordre
-// du dictionnaire regroupe des mots proches orthographiquement, source d'interférence à la
-// mémorisation — voir la décision actée dans le plan).
+// Parcours vocabulaire quotidien (§L du plan, révisé après retour utilisateur) : cohortes de 20
+// mots/jour tirées du minimum B1 (DictionaryEntry.inB1Minimum), regroupées par "famille" (mots
+// partageant le même bare — homonymes, jamais coupés entre deux jours) et ordonnées par un
+// tirage pseudo-aléatoire seedé sur l'utilisateur (pas alphabétique).
 //
-// Les mots ne sont "programmés" qu'ici (via B1VocabDay) — les introduire réellement (créer
-// l'Encounter qui les fait entrer dans la collection/le SRS) reste un geste explicite de
-// l'utilisateur (§ objectif-b1/actions.ts, introduceB1WordAction), jamais automatique.
+// Un jour n'est "acquis" que lorsque CHAQUE mot a été validé par un test de traduction réussi
+// (dernière tentative `vocab:ru-fr` correcte) — pas simplement "vu" (Encounter). Le calendrier
+// avance tout seul (1 jour programmé = 1 jour civil écoulé depuis le tout premier jour) : si des
+// jours sont manqués sans être validés, ils s'accumulent dans le pool "Nouveaux" au lieu d'être
+// sautés ou de bloquer indéfiniment.
 
 import { prisma } from "@/lib/db";
 import { makeRng, seededShuffle } from "./rng";
 
 const COHORT_SIZE = 20;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 interface B1Family {
   bare: string;
@@ -51,91 +52,139 @@ function packCohorts(families: B1Family[]): number[][] {
 }
 
 /** Ordre stable pour un utilisateur donné : recalculé à l'identique à chaque appel (pas besoin
- * de persister la permutation), seedé sur son id pour qu'un autre utilisateur ait un ordre
- * différent sans que ça change quoi que ce soit à l'algorithme. */
+ * de persister la permutation), seedé sur son id. */
 async function buildAllCohorts(userId: string): Promise<number[][]> {
   const families = await getB1Families();
   const rng = makeRng(`b1-curriculum:${userId}`);
   return packCohorts(seededShuffle(families, rng));
 }
 
-async function getHighestIntroducedDay(userId: string): Promise<number> {
-  const last = await prisma.b1VocabDay.findFirst({
-    where: { userId, introducedAt: { not: null } },
-    orderBy: { dayIndex: "desc" },
-    select: { dayIndex: true },
+/** "Maîtrisé" = la dernière tentative de traduction ru→fr (`vocab:ru-fr`) sur ce mot est
+ * correcte — pas juste "vu". Autorise le classique "dernière tentative gagne" déjà utilisé
+ * ailleurs dans l'app (getVocabCardAction mistakesOnly, getMistakeCardAction). */
+async function getMasteredEntryIds(userId: string, entryIds: number[]): Promise<Set<number>> {
+  if (entryIds.length === 0) return new Set();
+  const attempts = await prisma.quizAttempt.findMany({
+    where: { userId, entryId: { in: entryIds }, formKey: "vocab:ru-fr" },
+    orderBy: { createdAt: "desc" },
+    select: { entryId: true, correct: true },
   });
-  return last?.dayIndex ?? -1;
+  const latest = new Map<number, boolean>();
+  for (const a of attempts) {
+    if (a.entryId != null && !latest.has(a.entryId)) latest.set(a.entryId, a.correct);
+  }
+  return new Set(entryIds.filter((id) => latest.get(id) === true));
 }
 
-async function isCohortComplete(userId: string, entryIds: number[]): Promise<boolean> {
-  if (entryIds.length === 0) return true;
-  const encountered = await prisma.encounter.findMany({
+async function getIntroducedEntryIds(userId: string, entryIds: number[]): Promise<Set<number>> {
+  if (entryIds.length === 0) return new Set();
+  const enc = await prisma.encounter.findMany({
     where: { userId, entryId: { in: entryIds } },
     select: { entryId: true },
     distinct: ["entryId"],
   });
-  return new Set(encountered.map((e) => e.entryId)).size >= entryIds.length;
+  return new Set(enc.map((e) => e.entryId!));
 }
 
-export interface B1DayCohort {
-  dayIndex: number;
-  entryIds: number[];
+export interface B1State {
+  scheduledDayIndex: number;
   totalDays: number;
+  /** Mots pas encore rencontrés du tout, dans les jours dus (aujourd'hui + retard éventuel). */
+  nouveauxToIntroduce: number[];
+  /** Mots déjà rencontrés mais pas encore maîtrisés, dans les jours dus (hors "hier" séparé). */
+  nouveauxToTest: number[];
+  dayIndex: number | null; // le(s) jour(s) "hier" concerné, ou null si aucun
+  hierToIntroduce: number[]; // normalement vide — filet de sécurité
+  hierToTest: number[];
+  /** Mots déjà maîtrisés et plus vieux que "hier" — pratique libre, sans fin. */
+  mixEntryIds: number[];
 }
 
-/** Cohorte du jour courant pour cet utilisateur, en avançant paresseusement au jour suivant si
- * la cohorte en cours est déjà complète (chaque mot a au moins un Encounter). Crée la ligne
- * B1VocabDay du jour 0 au tout premier appel. Renvoie null si le minimum B1 est vide en base
- * (import pas encore lancé). */
-export async function getTodayCohort(userId: string): Promise<B1DayCohort | null> {
+/** Calcule l'état courant du parcours pour un utilisateur : ce qui est dû aujourd'hui (avec le
+ * retard éventuel accumulé), ce qui relève de "hier", et ce qui est déjà acquis (mélange). Tout
+ * est recalculé à chaque appel depuis Encounter/QuizAttempt — aucun état "jour validé" n'est mis
+ * en cache, donc rien ne peut rester figé sur une valeur périmée. */
+export async function getB1State(userId: string): Promise<B1State | null> {
   const cohorts = await buildAllCohorts(userId);
   if (cohorts.length === 0) return null;
 
-  const highest = await getHighestIntroducedDay(userId);
-  if (highest === -1) {
-    await prisma.b1VocabDay.create({
+  let day0 = await prisma.b1VocabDay.findUnique({
+    where: { userId_dayIndex: { userId, dayIndex: 0 } },
+  });
+  if (!day0) {
+    day0 = await prisma.b1VocabDay.create({
       data: { userId, dayIndex: 0, entryIds: JSON.stringify(cohorts[0]), introducedAt: new Date() },
     });
-    return { dayIndex: 0, entryIds: cohorts[0], totalDays: cohorts.length };
   }
+  const epoch = (day0.introducedAt ?? new Date()).getTime();
+  const scheduledDayIndex = Math.min(
+    cohorts.length - 1,
+    Math.floor((Date.now() - epoch) / ONE_DAY_MS),
+  );
 
-  const row = await prisma.b1VocabDay.findUnique({
-    where: { userId_dayIndex: { userId, dayIndex: highest } },
-  });
-  const entryIds = row?.entryIds ? (JSON.parse(row.entryIds) as number[]) : cohorts[highest];
-
-  if (highest + 1 < cohorts.length && (await isCohortComplete(userId, entryIds))) {
-    const dayIndex = highest + 1;
-    await prisma.b1VocabDay.create({
-      data: { userId, dayIndex, entryIds: JSON.stringify(cohorts[dayIndex]), introducedAt: new Date() },
+  for (let d = 1; d <= scheduledDayIndex; d++) {
+    const exists = await prisma.b1VocabDay.findUnique({
+      where: { userId_dayIndex: { userId, dayIndex: d } },
     });
-    return { dayIndex, entryIds: cohorts[dayIndex], totalDays: cohorts.length };
+    if (!exists) {
+      await prisma.b1VocabDay.create({
+        data: { userId, dayIndex: d, entryIds: JSON.stringify(cohorts[d]), introducedAt: new Date() },
+      });
+    }
   }
 
-  return { dayIndex: highest, entryIds, totalDays: cohorts.length };
-}
+  interface DueDay {
+    dayIndex: number;
+    entryIds: number[];
+    mastered: Set<number>;
+    introduced: Set<number>;
+  }
+  const dueDays: DueDay[] = [];
+  for (let d = 0; d <= scheduledDayIndex; d++) {
+    const entryIds = cohorts[d];
+    const mastered = await getMasteredEntryIds(userId, entryIds);
+    if (mastered.size < entryIds.length) {
+      const introduced = await getIntroducedEntryIds(userId, entryIds);
+      dueDays.push({ dayIndex: d, entryIds, mastered, introduced });
+    }
+  }
 
-/** Cohorte de la veille (jour courant - 1), ou null si l'utilisateur n'a pas encore de jour 1. */
-export async function getYesterdayEntryIds(userId: string): Promise<number[] | null> {
-  const highest = await getHighestIntroducedDay(userId);
-  if (highest <= 0) return null;
-  const row = await prisma.b1VocabDay.findUnique({
-    where: { userId_dayIndex: { userId, dayIndex: highest - 1 } },
-  });
-  return row?.entryIds ? (JSON.parse(row.entryIds) as number[]) : null;
-}
+  // "Hier" = le jour programmé juste avant aujourd'hui, uniquement s'il a déjà été entamé (sinon
+  // c'est du retard pur et simple, qui reste dans "Nouveaux" en attendant d'être introduit).
+  const yesterdayIndex = scheduledDayIndex - 1;
+  const hier = dueDays.find((d) => d.dayIndex === yesterdayIndex && d.introduced.size > 0) ?? null;
 
-/** Union de tous les jours strictement antérieurs à hier (pour ne pas faire doublon avec l'onglet
- * "Hier"). Vide tant qu'il n'y a pas au moins 2 jours déjà introduits. */
-export async function getMixEntryIds(userId: string): Promise<number[]> {
-  const highest = await getHighestIntroducedDay(userId);
-  if (highest <= 1) return [];
-  const rows = await prisma.b1VocabDay.findMany({
-    where: { userId, dayIndex: { lt: highest - 1 } },
+  const nouveauxDays = dueDays.filter((d) => d.dayIndex !== hier?.dayIndex);
+  const nouveauxToIntroduce = nouveauxDays.flatMap((d) =>
+    d.entryIds.filter((id) => !d.introduced.has(id)),
+  );
+  const nouveauxToTest = nouveauxDays.flatMap((d) =>
+    d.entryIds.filter((id) => d.introduced.has(id) && !d.mastered.has(id)),
+  );
+
+  const hierToIntroduce = hier ? hier.entryIds.filter((id) => !hier.introduced.has(id)) : [];
+  const hierToTest = hier
+    ? hier.entryIds.filter((id) => hier.introduced.has(id) && !hier.mastered.has(id))
+    : [];
+
+  // Mélange : tout ce qui est maîtrisé, dans les jours strictement plus anciens que "hier" (ou
+  // que le jour du jour, s'il n'y a pas encore de "hier" distinct).
+  const mixCutoff = hier?.dayIndex ?? scheduledDayIndex;
+  const mixRows = await prisma.b1VocabDay.findMany({
+    where: { userId, dayIndex: { lt: mixCutoff } },
     select: { entryIds: true },
   });
-  const ids = new Set<number>();
-  for (const r of rows) for (const id of JSON.parse(r.entryIds) as number[]) ids.add(id);
-  return [...ids];
+  const mixCandidates = mixRows.flatMap((r) => JSON.parse(r.entryIds) as number[]);
+  const mixMastered = await getMasteredEntryIds(userId, mixCandidates);
+
+  return {
+    scheduledDayIndex,
+    totalDays: cohorts.length,
+    nouveauxToIntroduce,
+    nouveauxToTest,
+    dayIndex: hier?.dayIndex ?? null,
+    hierToIntroduce,
+    hierToTest,
+    mixEntryIds: [...mixMastered],
+  };
 }
