@@ -2,12 +2,19 @@
 
 import { useCallback, useState } from "react";
 import { B1MasteryPool } from "@/components/b1-mastery-pool";
+import { B1DayCalendar } from "@/components/b1-day-calendar";
 import { VocabCard } from "@/components/vocab-card";
-import { getB1PoolsAction, type B1Pools } from "@/app/objectif-b1/actions";
+import { getB1PoolsAction, type B1Pools, type B1VocabWord } from "@/app/objectif-b1/actions";
 
-type Tab = "nouveaux" | "hier" | "melange";
+type Tab = "nouveaux" | "hier" | "melange" | "historique";
 
-export function B1Reviser({ initial }: { initial: B1Pools | null }) {
+export function B1Reviser({
+  initial,
+  initialTodayWords,
+}: {
+  initial: B1Pools | null;
+  initialTodayWords: B1VocabWord[];
+}) {
   const [pools, setPools] = useState(initial);
   const [tab, setTab] = useState<Tab>("nouveaux");
 
@@ -32,6 +39,7 @@ export function B1Reviser({ initial }: { initial: B1Pools | null }) {
     { key: "nouveaux", label: "Nouveaux" },
     { key: "hier", label: "Hier" },
     { key: "melange", label: "Mélange" },
+    { key: "historique", label: "Historique" },
   ];
 
   return (
@@ -39,7 +47,7 @@ export function B1Reviser({ initial }: { initial: B1Pools | null }) {
       <p className="text-center text-xs text-foreground/40">
         Jour {pools.scheduledDayIndex + 1} / {pools.totalDays}
       </p>
-      <div className="mx-auto flex w-fit gap-1 rounded-xl bg-white/5 p-1">
+      <div className="mx-auto flex w-fit flex-wrap justify-center gap-1 rounded-xl bg-white/5 p-1">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -91,6 +99,10 @@ export function B1Reviser({ initial }: { initial: B1Pools | null }) {
               : "Tout est à jour dans le mélange pour l’instant — reviens plus tard."
           }
         />
+      )}
+
+      {tab === "historique" && (
+        <B1DayCalendar scheduledDayIndex={pools.scheduledDayIndex} initialWords={initialTodayWords} />
       )}
     </div>
   );

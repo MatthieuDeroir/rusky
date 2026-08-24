@@ -55,6 +55,18 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/).
   tirés) : plus aucun rejet passe 4 ; les rejets restants sont des erreurs de génération
   ponctuelles (schéma/structure/cible) déjà couvertes par le mécanisme de retry existant.
 
+### Added (parcours vocabulaire quotidien, §L — suite)
+- Onglet "Historique" sur `/objectif-b1/reviser` : petit calendrier (aujourd'hui en premier,
+  jours précédents ensuite) pour consulter en lecture seule les 20 mots d'un jour passé, avec
+  statut par mot (maîtrisé / en cours / pas encore vu).
+
+### Fixed (parcours vocabulaire quotidien, §L — suite)
+- Un mot déjà maîtrisé via une pratique antérieure sans rapport avec B1 (ex. déjà vu côté
+  Traduire) était silencieusement exclu du total du jour (20 affiché comme 19). Il compte
+  maintenant dans le total sans repasser par la boucle carte/test.
+- Le compteur affichait "0/19" avant même la première carte au lieu de "1/20" (convention
+  "complété" au lieu de "position courante") — corrigé sur les trois écrans (carte, test, rappel).
+
 ### Fixed (parcours vocabulaire quotidien, §L)
 - Un jour avançait dès que ses mots étaient "vus" (Encounter), sans être réellement testés.
   "Maîtrisé" exige désormais une dernière tentative `vocab:ru-fr` correcte. Nouvelle boucle

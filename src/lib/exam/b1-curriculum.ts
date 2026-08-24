@@ -93,9 +93,13 @@ export interface B1State {
   nouveauxToIntroduce: number[];
   /** Mots déjà rencontrés mais pas encore maîtrisés, dans les jours dus (hors "hier" séparé). */
   nouveauxToTest: number[];
+  /** Déjà maîtrisés via une pratique antérieure (hors B1) — comptent dans le total du jour,
+   * sans repasser par la boucle carte/test. */
+  nouveauxAlreadyMastered: number;
   dayIndex: number | null; // le(s) jour(s) "hier" concerné, ou null si aucun
   hierToIntroduce: number[]; // normalement vide — filet de sécurité
   hierToTest: number[];
+  hierAlreadyMastered: number;
   /** Mots déjà maîtrisés et plus vieux que "hier" — pratique libre, sans fin. */
   mixEntryIds: number[];
 }
@@ -161,11 +165,16 @@ export async function getB1State(userId: string): Promise<B1State | null> {
   const nouveauxToTest = nouveauxDays.flatMap((d) =>
     d.entryIds.filter((id) => d.introduced.has(id) && !d.mastered.has(id)),
   );
+  // Un mot peut déjà être "maîtrisé" via une pratique antérieure sans rapport avec le parcours B1
+  // (ex. déjà révisé côté Traduire) — il ne rejoint ni toIntroduce ni toTest, mais doit quand même
+  // compter dans le total du jour (20), pas être silencieusement soustrait.
+  const nouveauxAlreadyMastered = nouveauxDays.reduce((sum, d) => sum + d.mastered.size, 0);
 
   const hierToIntroduce = hier ? hier.entryIds.filter((id) => !hier.introduced.has(id)) : [];
   const hierToTest = hier
     ? hier.entryIds.filter((id) => hier.introduced.has(id) && !hier.mastered.has(id))
     : [];
+  const hierAlreadyMastered = hier ? hier.mastered.size : 0;
 
   // Mélange : tout ce qui est maîtrisé, dans les jours strictement plus anciens que "hier" (ou
   // que le jour du jour, s'il n'y a pas encore de "hier" distinct).
@@ -182,9 +191,20 @@ export async function getB1State(userId: string): Promise<B1State | null> {
     totalDays: cohorts.length,
     nouveauxToIntroduce,
     nouveauxToTest,
+    nouveauxAlreadyMastered,
     dayIndex: hier?.dayIndex ?? null,
     hierToIntroduce,
     hierToTest,
+    hierAlreadyMastered,
     mixEntryIds: [...mixMastered],
   };
+}
+
+/** Ids d'un jour précis du parcours, pour le petit calendrier de consultation (lecture seule,
+ * ne crée ni ne modifie rien) — null si ce jour n'a pas encore été atteint. */
+export async function getDayEntryIds(userId: string, dayIndex: number): Promise<number[] | null> {
+  const row = await prisma.b1VocabDay.findUnique({
+    where: { userId_dayIndex: { userId, dayIndex } },
+  });
+  return row ? (JSON.parse(row.entryIds) as number[]) : null;
 }

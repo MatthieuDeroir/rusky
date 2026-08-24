@@ -12,7 +12,7 @@ import type { XpAward } from "@/lib/xp";
 import { createPaper } from "@/lib/exam/generate";
 import { isPassed, TRKI1_CONFIG, type PassResult, type SubtestCode } from "@/lib/exam/config";
 import type { LexgramPayload } from "@/lib/exam/types";
-import { getB1State } from "@/lib/exam/b1-curriculum";
+import { getB1State, getDayEntryIds } from "@/lib/exam/b1-curriculum";
 import { WORD_TYPE_LABELS, type WordType } from "@/lib/grammar";
 
 export interface PaperStatus {
@@ -261,11 +261,13 @@ export interface B1VocabWord {
   translationsFr: string | null;
   /** true = déjà "vu" (Encounter posé) — le mot est passé côté collection/SRS. */
   encountered: boolean;
+  /** true = dernière tentative de traduction ru→fr correcte (voir b1-curriculum.ts). */
+  mastered: boolean;
 }
 
 async function loadB1Words(userId: string, entryIds: number[]): Promise<B1VocabWord[]> {
   if (entryIds.length === 0) return [];
-  const [entries, encountered] = await Promise.all([
+  const [entries, encountered, attempts] = await Promise.all([
     prisma.dictionaryEntry.findMany({
       where: { id: { in: entryIds } },
       select: { id: true, accented: true, type: true, translationsFr: true },
@@ -275,8 +277,20 @@ async function loadB1Words(userId: string, entryIds: number[]): Promise<B1VocabW
       select: { entryId: true },
       distinct: ["entryId"],
     }),
+    prisma.quizAttempt.findMany({
+      where: { userId, entryId: { in: entryIds }, formKey: "vocab:ru-fr" },
+      orderBy: { createdAt: "desc" },
+      select: { entryId: true, correct: true },
+    }),
   ]);
   const encounteredIds = new Set(encountered.map((e) => e.entryId));
+  const masteredIds = new Set<number>();
+  const seen = new Set<number>();
+  for (const a of attempts) {
+    if (a.entryId == null || seen.has(a.entryId)) continue;
+    seen.add(a.entryId);
+    if (a.correct) masteredIds.add(a.entryId);
+  }
   const byId = new Map(entries.map((e) => [e.id, e]));
   // Garde l'ordre de la cohorte (familles groupées ensemble), pas l'ordre de retour de la requête.
   return entryIds
@@ -289,12 +303,16 @@ async function loadB1Words(userId: string, entryIds: number[]): Promise<B1VocabW
       typeLabel: WORD_TYPE_LABELS[e.type as WordType],
       translationsFr: e.translationsFr,
       encountered: encounteredIds.has(e.id),
+      mastered: masteredIds.has(e.id),
     }));
 }
 
 export interface B1MasteryPoolData {
   toIntroduce: B1VocabWord[];
   toTest: B1VocabWord[];
+  /** Déjà maîtrisés (pratique antérieure hors B1) — comptent dans le total du jour sans repasser
+   * par la boucle carte/test. */
+  alreadyMastered: number;
 }
 
 export interface B1Pools {
@@ -325,10 +343,27 @@ export async function getB1PoolsAction(): Promise<B1Pools | null> {
   return {
     scheduledDayIndex: state.scheduledDayIndex,
     totalDays: state.totalDays,
-    nouveaux: { toIntroduce: nouveauxIntro, toTest: nouveauxTest },
-    hier: state.dayIndex === null ? null : { toIntroduce: hierIntro, toTest: hierTest },
+    nouveaux: {
+      toIntroduce: nouveauxIntro,
+      toTest: nouveauxTest,
+      alreadyMastered: state.nouveauxAlreadyMastered,
+    },
+    hier:
+      state.dayIndex === null
+        ? null
+        : { toIntroduce: hierIntro, toTest: hierTest, alreadyMastered: state.hierAlreadyMastered },
     mixEntryIds: state.mixEntryIds,
   };
+}
+
+/** Les 20 mots d'un jour précis du parcours, pour le petit calendrier de consultation
+ * (/objectif-b1/reviser) — lecture seule, ne crée ni ne modifie rien. null si ce jour n'a pas
+ * encore été atteint. */
+export async function getB1DayWordsAction(dayIndex: number): Promise<B1VocabWord[] | null> {
+  const userId = await currentUserId();
+  const entryIds = await getDayEntryIds(userId, dayIndex);
+  if (!entryIds) return null;
+  return loadB1Words(userId, entryIds);
 }
 
 /** Marque un mot du jour comme "vu" : crée son premier Encounter (le fait entrer dans la

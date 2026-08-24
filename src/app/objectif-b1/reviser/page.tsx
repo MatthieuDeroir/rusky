@@ -1,12 +1,13 @@
 import { BackButton } from "@/components/back-button";
 import { B1Reviser } from "@/components/b1-reviser";
-import { getB1PoolsAction } from "@/app/objectif-b1/actions";
+import { getB1PoolsAction, getB1DayWordsAction } from "@/app/objectif-b1/actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Réviser B1 · Русский" };
 
 export default async function ReviserB1Page() {
   const pools = await getB1PoolsAction();
+  const todayWords = pools ? await getB1DayWordsAction(pools.scheduledDayIndex) : null;
 
   return (
     <div className="relative mx-auto max-w-2xl space-y-6">
@@ -18,7 +19,7 @@ export default async function ReviserB1Page() {
           mot validé par un test de traduction, pas juste vu.
         </p>
       </div>
-      <B1Reviser initial={pools} />
+      <B1Reviser initial={pools} initialTodayWords={todayWords ?? []} />
     </div>
   );
 }

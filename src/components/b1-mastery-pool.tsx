@@ -63,13 +63,20 @@ export function B1MasteryPool({
   const [result, setResult] = useState<{ correct: boolean; expected: string[] } | null>(null);
   const [isBusy, startBusy] = useTransition();
 
-  const totalWords = data.toIntroduce.length + data.toTest.length;
-  if (totalWords === 0) {
+  // Un mot déjà maîtrisé via une pratique antérieure (hors B1) ne repasse pas par la boucle
+  // carte/test, mais compte quand même dans le total du jour — sinon "20 mots" affichait "19".
+  const actionableTotal = data.toIntroduce.length + data.toTest.length;
+  const dayTotal = actionableTotal + data.alreadyMastered;
+  if (actionableTotal === 0) {
     return (
       <div className="glass-strong rounded-3xl p-10 text-center">
-        <h2 className="text-xl font-semibold">Rien à faire ici pour l’instant</h2>
+        <h2 className="text-xl font-semibold">
+          {dayTotal > 0 ? `${label} déjà validé 🎉` : "Rien à faire ici pour l’instant"}
+        </h2>
         <p className="mt-2 text-foreground/65">
-          Reviens plus tard — {label.toLowerCase()} se remplira au fil du parcours.
+          {dayTotal > 0
+            ? `Les ${dayTotal} mots sont maîtrisés — reviens plus tard pour la suite.`
+            : `Reviens plus tard — ${label.toLowerCase()} se remplira au fil du parcours.`}
         </p>
       </div>
     );
@@ -145,7 +152,10 @@ export function B1MasteryPool({
 
   if (stage.kind === "card") {
     const current = stage.queue[0];
-    const done = data.toIntroduce.length + data.toTest.length - stage.queue.length - stage.carriedOver.length;
+    // Position 1-indexée dans le jour complet (mots déjà maîtrisés inclus dans le total, pas
+    // seulement dans ce qu'il reste à traiter) — "1/20" dès le premier mot, pas "0/19".
+    const processed = actionableTotal - stage.queue.length - stage.carriedOver.length;
+    const position = Math.min(dayTotal, data.alreadyMastered + processed + 1);
     return (
       <div className="space-y-5">
         {stage.mode === "review" ? (
@@ -153,7 +163,7 @@ export function B1MasteryPool({
             {stage.queue.length} mot{stage.queue.length > 1 ? "s" : ""} à revoir avant de retester
           </p>
         ) : (
-          <Progress label={label} done={Math.max(0, done)} total={totalWords} />
+          <Progress label={label} position={position} total={dayTotal} />
         )}
         <WordFlashcard word={current} />
         <div className="text-center">
@@ -175,10 +185,19 @@ export function B1MasteryPool({
 
   if (stage.kind === "test") {
     const current = stage.queue[0];
-    const done = stage.roundSize - stage.queue.length;
+    const isFirstRound = stage.roundSize === actionableTotal;
+    const processedInRound = stage.roundSize - stage.queue.length;
     return (
       <div className="space-y-5">
-        <Progress label={label} done={done} total={stage.roundSize} />
+        {isFirstRound ? (
+          <Progress
+            label={label}
+            position={Math.min(dayTotal, data.alreadyMastered + processedInRound + 1)}
+            total={dayTotal}
+          />
+        ) : (
+          <Progress label={`${label} · à revalider`} position={processedInRound + 1} total={stage.roundSize} />
+        )}
         <div className="glass-strong rounded-3xl p-8 text-center">
           <Badge variant="secondary" className="bg-white/10">
             {current.typeLabel}
@@ -261,19 +280,22 @@ function WordFlashcard({ word }: { word: B1VocabWord }) {
   );
 }
 
-function Progress({ label, done, total }: { label: string; done: number; total: number }) {
+/** `position` est 1-indexé ("tu es sur le mot N") — la barre elle-même se remplit sur N-1/total
+ * (vide au tout premier mot, pleine une fois le dernier terminé). */
+function Progress({ label, position, total }: { label: string; position: number; total: number }) {
+  const filled = Math.max(0, position - 1);
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium">{label}</span>
         <span className="text-foreground/55 tabular-nums">
-          {done}/{total}
+          {position}/{total}
         </span>
       </div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
         <div
           className="h-full rounded-full bg-gradient-to-r from-primary/60 to-primary transition-[width] duration-500 ease-out"
-          style={{ width: `${total ? (done / total) * 100 : 0}%` }}
+          style={{ width: `${total ? (filled / total) * 100 : 0}%` }}
         />
       </div>
     </div>
