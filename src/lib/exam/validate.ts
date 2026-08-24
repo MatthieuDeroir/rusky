@@ -61,10 +61,24 @@ async function passLexicon(payload: LexgramPayload, userId?: string): Promise<Va
   const bares = [...words];
   const inDictionary = await prisma.dictionaryEntry.findMany({
     where: { bare: { in: bares } },
-    select: { bare: true, inB1Minimum: true },
+    select: { bare: true, inB1Minimum: true, partner: true },
   });
+  // Un verbe dont le partenaire aspectuel est dans le minimum B1 est toléré lui aussi (ex.
+  // "достигать" est listé, "достичь" — sa forme perfective, pas une entrée séparée du lexique
+  // officiel — ne l'est pas mais reste un mot B1 au sens propre).
+  const partnerBares = inDictionary.map((d) => d.partner).filter((p): p is string => !!p);
+  const partnerEntries = partnerBares.length
+    ? await prisma.dictionaryEntry.findMany({
+        where: { bare: { in: partnerBares } },
+        select: { bare: true, inB1Minimum: true },
+      })
+    : [];
+  const partnerB1 = new Map(partnerEntries.map((p) => [p.bare, p.inB1Minimum]));
   const known = new Map<string, boolean>();
-  for (const d of inDictionary) known.set(d.bare, known.get(d.bare) || d.inB1Minimum);
+  for (const d of inDictionary) {
+    const b1 = d.inB1Minimum || (d.partner ? (partnerB1.get(d.partner) ?? false) : false);
+    known.set(d.bare, known.get(d.bare) || b1);
+  }
 
   let userPokedex: Set<string> = new Set();
   if (userId) {
@@ -82,7 +96,12 @@ async function passLexicon(payload: LexgramPayload, userId?: string): Promise<Va
     return true; // connu du dictionnaire mais ni B1 ni pokédex → hors scope B1
   });
 
-  const ok = outOfScope.length === 0;
+  // Tolérance d'un mot hors minimum B1 par phrase : un LLM ne peut pas connaître exactement la
+  // frontière d'une liste curatée de 2500 mots (aucune liste ne lui est transmise, juste une
+  // consigne). En zéro tolérance, observé en prod : rejet quasi systématique sur un seul mot
+  // isolé (souvent un mot A1/A2 déjà connu mais absent de la liste, ex. "местный", "зонтик").
+  const TOLERANCE = 1;
+  const ok = outOfScope.length <= TOLERANCE;
   return {
     pass: 4,
     name: "lexique",

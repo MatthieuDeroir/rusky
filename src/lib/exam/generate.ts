@@ -13,8 +13,11 @@ import { validateLexgramItem, type ValidationStep } from "./validate";
 import type { LexgramPayload } from "./types";
 import * as caseGovernmentVerbPrompt from "./prompts/lexgram.case-government-verb";
 
-const CONCURRENCY = 4;
-const MAX_RETRIES = 3;
+// Concurrence réduite de 4 à 2 : observé en prod, 4 slots en parallèle (chacun générant +
+// solveur, jusqu'à MAX_RETRIES fois) déclenchait le rate limit Mistral 429 (voir aussi le
+// backoff ajouté dans chatJson, mistral.ts).
+const CONCURRENCY = 2;
+const MAX_RETRIES = 4;
 const BANK_LOOKBACK_PAPERS = 5;
 
 interface PromptModule {

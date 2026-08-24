@@ -32,6 +32,17 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/).
 - Priorisation des révisions : говорение (25,2 % de l'examen) était sous-estimé dans le phasage
   d'origine ; remonté juste après M1 (nouvel ordre M1 → M2 speaking → M3 reading → M4 writing →
   M5 listening → M6).
+- Premier sujet réel créé en prod : échec systématique (10/19 items lexgram). Cause dominante,
+  passe 4 (lexique) : tolérance zéro — un mot isolé hors du minimum B1 (souvent un mot A1/A2 déjà
+  connu mais absent de la liste curatée, ex. « местный », « зонтик », ou la forme perfective d'un
+  verbe déjà listé, ex. « достичь » pour « достигать ») suffisait à rejeter toute la phrase.
+  Corrigé : tolérance d'un mot hors-liste par phrase + un verbe est toléré si son partenaire
+  aspectuel est dans le minimum B1 (`src/lib/exam/validate.ts`). Cause secondaire : le rate limit
+  Mistral (429) pendant les retries en concurrence consommait le budget de tentatives sans
+  résultat — ajout d'un backoff court sur 429 dans `chatJson` (`src/lib/mistral.ts`) et
+  concurrence lexgram réduite de 4 à 2 (`src/lib/exam/generate.ts`). Revérifié en prod (10 items
+  tirés) : plus aucun rejet passe 4 ; les rejets restants sont des erreurs de génération
+  ponctuelles (schéma/structure/cible) déjà couvertes par le mécanisme de retry existant.
 
 ## Migrations
 

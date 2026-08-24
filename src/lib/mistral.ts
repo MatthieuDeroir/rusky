@@ -34,29 +34,43 @@ interface ChatMsg {
   content: string;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function chatJson<T>(messages: ChatMsg[], temperature = 0.2): Promise<T> {
   const key = apiKey();
   if (!key) throw new Error("MISTRAL_API_KEY manquante");
-  const res = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify({
-      model: model(),
-      temperature,
-      response_format: { type: "json_object" },
-      messages,
-    }),
-  });
-  if (!res.ok) {
+  // 429 (rate limit) est transitoire : on absorbe avec un backoff court plutôt que de faire
+  // remonter l'échec directement — observé en prod, le générateur lexgram (concurrence + retries)
+  // déclenche facilement le rate limit et perdait sinon une tentative entière pour ça.
+  const BACKOFFS_MS = [600, 1800];
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: model(),
+        temperature,
+        response_format: { type: "json_object" },
+        messages,
+      }),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      const content = data.choices?.[0]?.message?.content ?? "{}";
+      return JSON.parse(content) as T;
+    }
     const detail = await res.text().catch(() => "");
+    if (res.status === 429 && attempt < BACKOFFS_MS.length) {
+      await sleep(BACKOFFS_MS[attempt]);
+      continue;
+    }
     throw new Error(`Mistral ${res.status}: ${detail.slice(0, 200)}`);
   }
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = data.choices?.[0]?.message?.content ?? "{}";
-  return JSON.parse(content) as T;
 }
 
 // ---- Grading a production task ---------------------------------------------------

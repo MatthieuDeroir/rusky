@@ -26,6 +26,14 @@ Une ligne par session de travail, jamais réécrite rétroactivement. Voir le pl
   individuels). Phasage M2-M6 réordonné (говорение remonté juste après M1).
 - `tsc --noEmit`, `npm run build`, `npm run lint` : propres.
 
+## 2026-08-24 (suite)
+
+- Premier `TrkiPaper` réel créé en prod par l'utilisateur : échec (10/19 items). Diagnostiqué
+  directement sur Turso (`TrkiBankItem.validatedBy`) : rejets massifs passe 4 (lexique, tolérance
+  zéro trop stricte) + rate limit Mistral 429 pendant les retries. Corrigé (tolérance 1 mot +
+  partenaire aspectuel, backoff 429, concurrence 4→2) et revérifié en prod avant push — voir
+  CHANGELOG.
+
 ### Reste à faire (voir plan §Ordre de construction)
 
 - 15 `typeId` lexgram restants (un par un, avec relecture).
