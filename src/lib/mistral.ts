@@ -552,3 +552,36 @@ export async function recommendExam(
     };
   }
 }
+
+// ---- Objectif B1 : examen blanc ТРКИ-1 (lexgram) --------------------------------
+// Un appel = un item (jamais un lot), conformément au principe du module — voir
+// /home/mderoir/.claude/plans/robust-yawning-plum.md. Le few-shot est injecté dans le texte du
+// message user (ChatMsg n'a pas de rôle assistant, volontairement non modifié pour rester
+// compatible avec gradeProduction/recommendExam ci-dessus).
+
+/** Génère un item lexgram brut (non validé) à partir d'un prompt déjà construit. */
+export async function generateLexgramItem(systemPrompt: string, userPrompt: string): Promise<unknown> {
+  return chatJson<unknown>(
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    0.85,
+  );
+}
+
+/** Passe 6 (contre-résolution) : redemande la réponse sans la clé, température 0. */
+export async function solveLexgramItem(stem: string, options: string[]): Promise<unknown> {
+  const sys =
+    "You are solving a Russian-as-a-foreign-language multiple-choice item (TORFL-1, B1). " +
+    'Output ONLY valid JSON: {"correctIndex": number} — the index (0-based) of the single option ' +
+    "that correctly fills the blank (___) in the sentence.";
+  const user = `Sentence: ${stem}\nOptions:\n${options.map((o, i) => `${i}: ${o}`).join("\n")}`;
+  return chatJson<unknown>(
+    [
+      { role: "system", content: sys },
+      { role: "user", content: user },
+    ],
+    0,
+  );
+}

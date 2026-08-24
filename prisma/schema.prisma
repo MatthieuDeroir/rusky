@@ -36,6 +36,9 @@ model DictionaryEntry {
   deeplChecked   Boolean @default(false)
   translationsEn String?
   translationsDe String?
+  // true = ce lemme fait partie du Lexique minimum B1 (Андрюшина et al., Златоуст), posé par
+  // scripts/import-b1-lexicon.ts depuis data/B1/lexique_b1.json. Alimente /objectif-b1.
+  inB1Minimum    Boolean @default(false)
 
   forms      DictionaryForm[]
   encounters Encounter[]
@@ -198,6 +201,10 @@ model UserStats {
   dailyXpGoal      Int     @default(50)
   streakFreezes    Int     @default(2)
   totalAttempts    Int     @default(0)
+  // Date cible pour l'examen ТРКИ-1 (objectif B1), réglable par l'utilisateur — pilote
+  // l'estimation de rythme/ETA sur /objectif-b1. Null = pas d'échéance fixée, ETA "au rythme actuel"
+  // uniquement.
+  b1TargetDate     DateTime?
 }
 
 /// XP journal — source of truth for today's XP and history.
@@ -235,4 +242,165 @@ model FormReview {
 
   @@id([userId, entryId, formKey])
   @@index([userId, dueAt])
+}
+
+/* ---------- Objectif B1 : examen blanc ТРКИ-1 (M1-M6) ---------- */
+/* Voir /home/mderoir/.claude/plans/robust-yawning-plum.md pour le plan complet. Préfixe Trki
+   choisi pour ne pas entrer en collision avec ExamItem (feature TORFL-par-tâche, sans rapport). */
+
+/// Sujet ТРКИ-1 généré pour une tentative — un ou plusieurs sous-tests selon ce qui a été demandé
+/// à createPaper(). Le blueprint est déterministe et vit en code (src/lib/exam/blueprints/).
+model TrkiPaper {
+  id               Int       @id @default(autoincrement())
+  userId           String
+  seed             String // seed RNG, rejouable (src/lib/exam/rng.ts)
+  blueprintVersion String // ex. "trki1-lexgram-v1"
+  subtests         String // JSON string[] des SubtestCode inclus (1 à 5)
+  purpose          String    @default("EXAM") // 'EXAM' (compte pour le banking) | 'PRACTICE'
+  status           String    @default("PENDING") // 'PENDING' | 'GENERATING' | 'READY' | 'FAILED'
+  error            String?
+  createdAt        DateTime  @default(now())
+  readyAt          DateTime?
+
+  passages TrkiPassage[]
+  items    TrkiItem[]
+  attempts TrkiAttempt[]
+
+  @@index([userId])
+  @@index([userId, status])
+}
+
+/// Texte/script partagé par plusieurs items (lecture : passage écrit ; écoute : script lu par
+/// Web Speech API côté client — pas de fichier audio stocké).
+model TrkiPassage {
+  id      Int       @id @default(autoincrement())
+  paperId Int
+  paper   TrkiPaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  subtest String // 'reading' | 'listening'
+  typeId  String // ex. "reading.narrative"
+  topic   String
+  text    String
+
+  items TrkiItem[]
+
+  @@index([paperId])
+}
+
+/// Banque d'items validés (§5.4 du spec) : filet en cas d'échec de génération, jamais plus de 20%
+/// d'un Paper. Indépendante des Paper individuels — réutilisable dans plusieurs.
+model TrkiBankItem {
+  id                Int       @id @default(autoincrement())
+  subtest           String // 'lexgram' | 'reading' | 'listening' | 'writing' | 'speaking'
+  typeId            String
+  targetId          String
+  payload           String // JSON : forme dépend du subtest, voir src/lib/exam/types.ts
+  answerKey         String // JSON : index correct (QCM) ; vide pour writing/speaking (rater)
+  distractorClasses String // JSON string[]
+  contentHash       String // phrase normalisée, anti-doublon
+  validatedBy       String // JSON : trace des passes de validation
+  quarantined       Boolean   @default(false) // désaccord passe 6, à trancher sur /admin/quarantine
+  // true = rejeté par une passe 1-5 (jamais éligible au tirage/à la banque), conservé uniquement
+  // pour le taux de rejet par passe sur /admin/health. false pour un item valide OU quarantiné.
+  rejected          Boolean   @default(false)
+  usedCount         Int       @default(0)
+  lastUsedAt        DateTime?
+  createdAt         DateTime  @default(now())
+
+  items TrkiItem[]
+
+  @@index([typeId, targetId])
+  @@index([contentHash])
+  @@index([quarantined])
+}
+
+/// Item concret dans UN Paper précis — copie figée, jamais réédité même si le TrkiBankItem
+/// d'origine change. bankItemId trace l'origine pour l'anti-répétition (§8 spec) et les stats.
+model TrkiItem {
+  id         Int           @id @default(autoincrement())
+  paperId    Int
+  paper      TrkiPaper     @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  passageId  Int?
+  passage    TrkiPassage?  @relation(fields: [passageId], references: [id], onDelete: Cascade)
+  bankItemId Int?
+  bankItem   TrkiBankItem? @relation(fields: [bankItemId], references: [id], onDelete: SetNull)
+  subtest    String
+  typeId     String
+  targetId   String
+  position   Int
+  payload    String
+  answerKey  String
+  points     Int           @default(1)
+
+  responses TrkiResponse[]
+
+  @@index([paperId])
+  @@index([passageId])
+  @@index([bankItemId])
+}
+
+model TrkiAttempt {
+  id          Int       @id @default(autoincrement())
+  userId      String
+  paperId     Int
+  paper       TrkiPaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  mode        String // 'FULL' | 'PARTIAL' (banking)
+  startedAt   DateTime  @default(now())
+  submittedAt DateTime?
+
+  responses TrkiResponse[]
+  results   TrkiSubtestResult[]
+
+  @@index([userId])
+  @@index([paperId])
+}
+
+model TrkiResponse {
+  id         Int         @id @default(autoincrement())
+  attemptId  Int
+  attempt    TrkiAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  itemId     Int
+  item       TrkiItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  answer     String // JSON : index (QCM) ou texte/transcript libre (writing/speaking)
+  correct    Boolean? // null tant que non corrigé (rater async pour writing/speaking)
+  feedback   String? // JSON : grille + errors[] du rater, item par item (writing/speaking)
+  answeredAt DateTime    @default(now())
+
+  @@index([attemptId])
+  @@index([itemId])
+  @@unique([attemptId, itemId])
+}
+
+model TrkiSubtestResult {
+  attemptId   Int
+  attempt     TrkiAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  subtest     String
+  rawScore    Float
+  maxScore    Float
+  ratio       Float
+  passed      Boolean
+  bankedUntil DateTime? // banking 2 ans
+  rubric      String? // JSON, grille agrégée pour writing/speaking
+
+  @@id([attemptId, subtest])
+}
+
+/// Cache de la recommandation IA "quoi travailler" — même principe que RecoCache (TORFL) mais
+/// dédié pour ne pas entrer en collision avec cet usage existant.
+model TrkiFocusCache {
+  userId    String   @id
+  signature String // hash des KPI au moment du calcul, invalide le cache si les KPI bougent
+  reco      String // JSON : { summary, priorities: [...] }
+  updatedAt DateTime @default(now())
+}
+
+/// Parcours vocabulaire quotidien : quels DictionaryEntry.id composent le "jour N" pour cet
+/// utilisateur, et quand ce jour a réellement été entamé (pas forcément un jour calendaire par
+/// jour de parcours si l'utilisateur saute des jours).
+model B1VocabDay {
+  userId       String
+  dayIndex     Int
+  entryIds     String // JSON int[]
+  introducedAt DateTime?
+
+  @@id([userId, dayIndex])
 }

@@ -53,6 +53,11 @@ next-env.d.ts
 # Raw third-party dumps (not committed)
 /data/_raw/
 
+# Lexique minimum B1 : PDF sous droit d'auteur (jamais committé) + l'extraction qui en dérive
+# (mots + traductions, déjà appliquée aux deux DB via scripts/import-b1-lexicon.ts — pas besoin
+# du fichier en historique git pour que l'app fonctionne). Voir docs/adr/0003.
+/data/B1/
+
 # Legacy JSON state (migré en DB)
 /prisma/_legacy-json/
 

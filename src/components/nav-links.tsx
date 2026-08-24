@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-// 5 entrées : Accueil / Exercices / Collection / Profil (+ le CTA "Ajouter" à part). Référence,
-// Cas, Chiffres et Validation vivent désormais sous Profil (page "Ressources").
+// Accueil / Exercices / Collection / Objectif B1 / Profil (+ le CTA "Ajouter" à part). Référence,
+// Cas, Chiffres et Validation vivent désormais sous Profil (page "Ressources"). Objectif B1 est
+// son propre espace dédié (voir /home/mderoir/.claude/plans/robust-yawning-plum.md, §M).
 const NAV: { href: string; label: string }[] = [
   { href: "/", label: "Accueil" },
   { href: "/exercices", label: "Exercices" },
   { href: "/collection", label: "Ma collection" },
+  { href: "/objectif-b1", label: "Objectif B1" },
   { href: "/profil", label: "Profil" },
 ];
 
