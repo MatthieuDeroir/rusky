@@ -18,6 +18,11 @@ const MONTHS = ["2026-06", "2026-07", "2026-08", "2026-09", "2026-10"];
 /** Dernier jour utilisable par mois (octobre : aujourd'hui). */
 const LAST_DAY: Record<string, number> = { "2026-06": 30, "2026-07": 31, "2026-08": 31, "2026-09": 30, "2026-10": 13 };
 const DAY_MS = 86_400_000;
+/** Prénoms et noms propres des leçons Duolingo (Вера Ивановна, Юля…) : pas du vocabulaire. */
+/** Lexème imposé quand l'entrée homographe est trompeuse dans le contexte Duolingo (« вина » :
+ * du vin ; « лет » : génitif de год ; « извините » : du verbe извинить). */
+const LEXEME: Record<string, string> = { извините: "извинить", простите: "простить", вина: "вино", лет: "год", будет: "быть" };
+const NAMES = new Set(["вера", "ивановна", "иванович", "иван", "ваня", "юля", "юле", "юлия", "марк", "светлана", "чернов"]);
 
 const file = process.argv[2];
 const apply = process.argv.includes("--apply");
@@ -42,25 +47,40 @@ if (!file) throw new Error("Chemin du fichier vocabulary.csv manquant");
   lines.forEach((l, i) => {
     for (const w of l.split(/\s+/)) {
       const raw = w.replace(/^[^а-яёА-ЯЁ]+|[^а-яёА-ЯЁ-]+$/g, "");
-      if (/[а-яё]/i.test(raw)) tokens.push({ norm: normalizeBare(raw), raw, month: monthOf(i) });
+      if (/[а-яё]/i.test(raw) && !NAMES.has(normalizeBare(raw))) tokens.push({ norm: normalizeBare(raw), raw, month: monthOf(i) });
     }
   });
   const cands = await lookupCandidates([...new Set(tokens.map((t) => t.norm))]);
   const ids = [...new Set([...cands.values()].flat().map((c) => c.entryId))];
-  const ranks = new Map(
-    (await prisma.dictionaryEntry.findMany({ where: { id: { in: ids } }, select: { id: true, b1Rank: true } })).map((e) => [e.id, e.b1Rank]),
+  const entries = new Map(
+    (
+      await prisma.dictionaryEntry.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, b1Rank: true, type: true, translationsFr: true },
+      })
+    ).map((e) => [e.id, e]),
   );
+  const ranks = new Map([...entries.values()].map((e) => [e.id, e.b1Rank]));
 
-  // Lexème : d'abord une lecture du lexique B1 (la plus fréquente : нас → мы, двери → дверь),
-  // sinon la forme du dictionnaire si le mot l'est déjà, sinon la première lecture.
+  // Lexème d'un mot :
+  //  1. on écarte les entrées sans traduction française (« нас : génitif de мы », « двери » vide) ;
+  //  2. forme d'un pronom du lexique B1 (нас, ей, его, она) → ce pronom (мы, он) ;
+  //  3. le mot est lui-même une entrée (просто, хорошо, лев, банка) → elle, la plus fréquente
+  //     du lexique B1 s'il y en a plusieurs (знать verbe, pas nom) ;
+  //  4. sinon la lecture du lexique B1 la plus fréquente (сыра → сыр, лет → год), ou la première.
+  const rankOf = (id: number) => ranks.get(id) ?? 100_000;
   const pick = (norm: string) => {
-    const list = cands.get(norm) ?? [];
-    if (list.length === 0) return null;
-    const score = (c: (typeof list)[number]) => {
-      const rank = ranks.get(c.entryId);
-      return rank != null ? rank : 100_000 + (c.lemmaBare === norm ? 0 : 1);
-    };
-    return [...list].sort((a, b) => score(a) - score(b))[0];
+    const all = cands.get(norm) ?? [];
+    const forced = LEXEME[norm] && all.find((c) => c.lemmaBare === LEXEME[norm]);
+    if (forced) return forced;
+    const list = all.filter((c) => entries.get(c.entryId)?.translationsFr);
+    if (list.length === 0) return all[0] ?? null;
+    const byRank = (xs: typeof list) => [...xs].sort((a, b) => rankOf(a.entryId) - rankOf(b.entryId))[0];
+    const exact = list.filter((c) => c.lemmaBare === norm);
+    const pronoun = list.find((c) => c.type === "pronoun" && c.lemmaBare !== norm && ranks.get(c.entryId) != null);
+    if (pronoun && exact.every((c) => c.type === "other")) return pronoun;
+    if (exact.length) return byRank(exact);
+    return byRank(list);
   };
 
   const unmatched = new Set<string>();
@@ -79,8 +99,14 @@ if (!file) throw new Error("Chemin du fichier vocabulary.csv manquant");
     lexemes.set(c.entryId, { month: t.month, lemma: c.lemmaBare, b1: ranks.get(c.entryId) != null });
   }
 
+  // Déjà dans le parcours, hors import Duolingo précédent (ré-exécutable : on resynchronise).
   const existing = new Set(
-    (await prisma.word.findMany({ where: { userId, entryId: { in: [...lexemes.keys()] } }, select: { entryId: true } })).map((w) => w.entryId),
+    (
+      await prisma.word.findMany({
+        where: { userId, entryId: { in: [...lexemes.keys()] }, origin: { not: "duolingo" } },
+        select: { entryId: true },
+      })
+    ).map((w) => w.entryId),
   );
   const fresh = [...lexemes.entries()].filter(([id]) => !existing.has(id));
 
@@ -119,6 +145,18 @@ if (!file) throw new Error("Chemin du fichier vocabulary.csv manquant");
       };
     });
   });
-  const res = await prisma.word.createMany({ data: rows });
-  console.log(`\n${res.count} mots importés.`);
+  // Resynchronisation avec un import précédent : retire les mots mal résolus, ajoute les autres,
+  // remet chaque mot à sa date.
+  const previous = await prisma.word.findMany({ where: { userId, origin: "duolingo" }, select: { entryId: true } });
+  const wanted = new Set(rows.map((r) => r.entryId));
+  const stale = previous.map((w) => w.entryId).filter((id) => !wanted.has(id));
+  const had = new Set(previous.map((w) => w.entryId));
+  if (stale.length) await prisma.word.deleteMany({ where: { userId, origin: "duolingo", entryId: { in: stale } } });
+  const added = await prisma.word.createMany({ data: rows.filter((r) => !had.has(r.entryId)) });
+  for (const r of rows.filter((r) => had.has(r.entryId)))
+    await prisma.word.update({
+      where: { userId_entryId: { userId, entryId: r.entryId } },
+      data: { knownAt: r.knownAt, firstSeenAt: r.firstSeenAt },
+    });
+  console.log(`\nImport : ${added.count} ajoutés, ${stale.length} retirés (mal résolus), ${rows.length - added.count} conservés.`);
 })();
