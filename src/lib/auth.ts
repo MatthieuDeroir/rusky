@@ -63,11 +63,21 @@ export const { handlers, signIn, signOut } = nextAuth;
 export const devBypass =
   process.env.AUTH_DEV_BYPASS === "1" && process.env.NODE_ENV === "development";
 
-let devUserId: string | null = null;
+let devUserId: Promise<string> | null = null;
 
-/** The owner's user id, looked up once per process (created if the account doesn't exist yet). */
-async function resolveDevUserId(): Promise<string> {
-  if (devUserId) return devUserId;
+/** The owner's user id, looked up once per process (created if the account doesn't exist yet).
+ * The PROMISE is memoized, not the result: otherwise a burst of parallel requests at startup each
+ * opens its own claimLegacyData transaction, and an aborted one can wedge the libsql adapter's
+ * lock — every later query then hangs (pages never finish streaming → reload loop). */
+function resolveDevUserId(): Promise<string> {
+  devUserId ??= lookupDevUserId().catch((e) => {
+    devUserId = null;
+    throw e;
+  });
+  return devUserId;
+}
+
+async function lookupDevUserId(): Promise<string> {
   const existing = await prisma.user.findFirst({
     where: { email: OWNER_EMAIL },
     select: { id: true },
@@ -78,7 +88,6 @@ async function resolveDevUserId(): Promise<string> {
       .id;
   await ensureUserStats(id);
   await claimLegacyData(id);
-  devUserId = id;
   return id;
 }
 

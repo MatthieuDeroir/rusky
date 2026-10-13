@@ -16,6 +16,9 @@ export const XP = {
   control: 40, // passed a level control (declension/conjugation/vocabulary)
   torfl: 60, // passed a TORFL épreuve
   review: 4, // an SRS review answered
+  structure: 5, // a structure question answered right in the Reader (first try)
+  reading: 15, // finished reading a text in the Reader
+  unit: 40, // validated a reading-structure unit (weekend session)
   bonus: 0,
 } as const;
 

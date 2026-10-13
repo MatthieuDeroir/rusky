@@ -2,16 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Dumbbell, Library, Target, Plus, User } from "lucide-react";
+import { Home, Library, BookOpen, Sun, User } from "lucide-react";
 
-// Accueil / Exercices / Collection / Objectif B1 / Ajouter (central) / Profil. Référence, Cas,
-// Chiffres et Validation vivent désormais sous Profil (page "Ressources").
+// Accueil / Lire / Aujourd'hui (central : l'habitude quotidienne) / Mots / Profil — pivot « Lire »
+// (v3). Exercices, Objectif B1, Ajouter un mot, Référence, Cas, Chiffres et Validation vivent sous
+// Profil ; la séance du week-end s'ouvre depuis l'Accueil.
 const ITEMS = [
   { href: "/", label: "Accueil", icon: Home, exact: true },
-  { href: "/exercices", label: "Exercices", icon: Dumbbell },
-  { href: "/collection", label: "Collection", icon: Library },
-  { href: "/objectif-b1", label: "Objectif B1", icon: Target },
-  { href: "/add", label: "Ajouter", icon: Plus, central: true },
+  { href: "/lire", label: "Lire", icon: BookOpen },
+  { href: "/jour", label: "Aujourd’hui", icon: Sun, central: true },
+  { href: "/collection", label: "Mots", icon: Library },
   { href: "/profil", label: "Profil", icon: User },
 ] as const;
 

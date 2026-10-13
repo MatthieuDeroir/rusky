@@ -4,6 +4,33 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added (v3 « Lire » — pivot vers la lecture, plan `voil-le-projet-que-mossy-rabbit.md`)
+- **Lecteur** `/lire/[id]` : texte collé/généré/corpus analysé phrase par phrase — mot cliquable
+  (lemme, forme, rôle, *raison* de la forme, garder le mot), mode Structure (couleurs par
+  fonction, subordonnées ⟨…⟩, squelette), traductions mot-à-mot + naturelle, accents, questions de
+  structure par paragraphe. Pipeline `src/lib/reader/analyze.ts` : candidats du dictionnaire en
+  une requête, choix par Mistral (`mistral-large-latest`, file 2 appels max + backoff 429),
+  paragraphes courts regroupés par lots de 5 phrases, recoupements déterministes (lecture ∈
+  dictionnaire, rection des prépositions, cohérence rôle ↔ cas, participes/gérondifs vérifiés par
+  dérivation `participles.ts`, questions à prémisse de cas vérifiées).
+- **Curriculum** des 12 structures de lecture (`src/lib/reader/curriculum.ts`) : fiche, tableau,
+  piège, 6 phrases-clés par unité.
+- **Séance du week-end** `/seance`, `/seance/[unitId]` : réchauffement → fiche + phrases-clés →
+  2 lectures guidées générées pour l'unité → lecture libre → bilan/validation (`UnitProgress`).
+- **Quotidien** `/jour` : révision éclair (SRS `ReaderReview` : mots gardés revus dans leur phrase,
+  questions de structure), texte du jour, phrase à décortiquer (trouver verbe/sujet/COD).
+- **Corpus** : 52 récits de Tolstoï (« Первая русская книга для чтения », domaine public) dans
+  `data/corpus/`, importés par `scripts/import-corpus.ts`, analysés à la première ouverture.
+- Scripts : `backup-turso.ts` (dump SQL sans CLI), `apply-sql-turso.ts` (refuse le SQL
+  destructeur), `reanalyze-texts.ts`, `clean-question-premises.ts`, smoke tests reader/generate.
+- Migration `20261010150000_add_reader` (ReadingText, ReadingProgress, UnitProgress,
+  ReaderReview) — local + Turso, backup avant.
+
+### Changed (v3)
+- Navigation : Accueil / Lire / **Aujourd'hui** (central) / Mots / Profil ; Exercices, Objectif B1
+  et Ajouter un mot passent sous Profil. Accueil centré sur le quotidien + l'unité du week-end.
+- XP : sources `structure`, `reading`, `unit`.
+
 ### Added (M2 говорение, §F du plan)
 - Moteur speaking complet : blueprint (`speaking-v1.ts`, 4 typeId — reactive/initiative-dialogue,
   situational-dialogue, monologue), prompts + few-shot par typeId, génération Mistral,

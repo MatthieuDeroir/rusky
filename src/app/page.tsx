@@ -1,48 +1,57 @@
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import { getCollection, getTypeProgress, dueReviewCount } from "@/lib/queries";
+import { ArrowRight, CalendarDays, Sun } from "lucide-react";
+import { getCollection, getTypeProgress } from "@/lib/queries";
 import { GameDashboard } from "@/components/game-dashboard";
 import { HomeProgress } from "@/components/home-progress";
 import { RadioPlayer } from "@/components/radio-player";
 import { currentUserId } from "@/lib/auth";
 import { getGameStats } from "@/lib/xp";
-import { Button } from "@/components/ui/button";
+import { getUnitStates } from "@/lib/reader/progress";
+import { dueReviewCount as readerDueCount } from "@/lib/reader/review";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const userId = await currentUserId();
-  const [items, stats, progress, due] = await Promise.all([
+  const [items, stats, progress, readerDue, units] = await Promise.all([
     getCollection(userId),
     getGameStats(userId),
     getTypeProgress(userId),
-    dueReviewCount(userId),
+    readerDueCount(userId),
+    getUnitStates(userId),
   ]);
-
-  if (items.length === 0) {
-    return (
-      <div className="glass-strong mx-auto mt-6 max-w-xl rounded-3xl p-8 text-center">
-        <h1 className="font-display text-2xl">Bienvenue 👋</h1>
-        <p className="mt-3 text-foreground/65">
-          Construis ton dictionnaire russe au fil de tes lectures. Ajoute un premier mot : l’app
-          détecte sa nature et la forme rencontrée, puis remplit la bonne case de son tableau.
-        </p>
-        <Button render={<Link href="/add" />} nativeButton={false} size="lg" className="mt-6">
-          Ajouter un premier mot
-        </Button>
-      </div>
-    );
-  }
-
-  // "Continuer" targets Réviser — it now handles both due reviews and new forms to discover.
-  const cont = {
-    href: due > 0 ? "/exercices/reviser" : "/exercices",
-    label: due > 0 ? `Réviser (${due})` : "S’entraîner",
-  };
+  const done = units.units.filter((u) => u.status === "done").length;
 
   return (
     <div className="space-y-8">
-      <GameDashboard stats={stats} continueHref={cont.href} continueLabel={cont.label} />
+      <GameDashboard stats={stats} continueHref="/jour" continueLabel="Aujourd’hui" />
+
+      {/* Pivot « Lire » (v3) : le quotidien consolide, le week-end apprend. */}
+      <section className="grid gap-3 sm:grid-cols-2">
+        <Link href="/jour" className="glass-strong glass-lift rounded-3xl p-5">
+          <div className="flex items-center gap-2 text-primary">
+            <Sun className="size-5" />
+            <span className="text-xs font-semibold uppercase tracking-wide">Aujourd’hui · 10-20 min</span>
+          </div>
+          <p className="mt-2 font-display text-xl">Révision, texte du jour, phrase à décortiquer</p>
+          <p className="mt-1 text-sm text-foreground/55">
+            {readerDue > 0 ? `${readerDue} carte${readerDue > 1 ? "s" : ""} à réviser` : "Rien d’urgent à réviser"}
+          </p>
+        </Link>
+        <Link href={`/seance/${units.current.id}`} className="glass-strong glass-lift rounded-3xl p-5">
+          <div className="flex items-center gap-2 text-primary">
+            <CalendarDays className="size-5" />
+            <span className="text-xs font-semibold uppercase tracking-wide">
+              Week-end · Unité {units.current.n}/12
+            </span>
+          </div>
+          <p className="mt-2 font-display text-xl">{units.current.title}</p>
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+            <div className="h-full rounded-full bg-primary" style={{ width: `${(done / 12) * 100}%` }} />
+          </div>
+          <p className="mt-1 text-xs text-foreground/50">{done}/12 structures validées</p>
+        </Link>
+      </section>
 
       <RadioPlayer />
 

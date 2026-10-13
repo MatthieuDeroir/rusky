@@ -212,7 +212,7 @@ model XpEvent {
   id        Int      @id @default(autoincrement())
   userId    String
   amount    Int
-  source    String // 'quiz' | 'complete' | 'translate' | 'case' | 'speak' | 'sentence' | 'control' | 'torfl' | 'discover' | 'review' | 'bonus'
+  source    String // 'quiz' | 'complete' | 'translate' | 'case' | 'speak' | 'sentence' | 'control' | 'torfl' | 'discover' | 'review' | 'structure' | 'reading' | 'unit' | 'bonus'
   day       String // "YYYY-MM-DD" in Europe/Paris
   createdAt DateTime @default(now())
 
@@ -408,4 +408,75 @@ model B1VocabDay {
   introducedAt DateTime?
 
   @@id([userId, dayIndex])
+}
+
+/* ---------- Lecteur (v3 « Lire ») ---------- */
+/* Voir /home/mderoir/.claude/plans/voil-le-projet-que-mossy-rabbit.md. */
+
+/// Un texte à lire dans le Lecteur — collé, généré ou issu du corpus. L'analyse (lecture
+/// retenue pour chaque mot, rôle dans la phrase, raison de la forme, traductions, questions de
+/// structure) est calculée une seule fois puis mise en cache ici, en JSON (src/lib/reader/types.ts).
+model ReadingText {
+  id              Int       @id @default(autoincrement())
+  userId          String? // null = texte du corpus, partagé
+  source          String // 'pasted' | 'generated' | 'corpus' | 'lesson'
+  title           String
+  body            String
+  unitId          String? // structure du curriculum ciblée (textes générés, phrases-clés d'une leçon)
+  purpose         String? // 'daily' (texte du jour) | 'decode' (phrase à décortiquer) | 'unit' (lecture guidée du week-end) | 'lesson' (phrases-clés d'une unité) | null (libre)
+  forDay          String? // "YYYY-MM-DD" (Europe/Paris) pour les textes du jour / phrases à décortiquer
+  difficulty      Float? // part des mots hors dictionnaire / hors vocabulaire courant (0-1)
+  attribution     String?
+  status          String    @default("PENDING") // 'GENERATING' | 'PENDING' | 'ANALYZING' | 'READY' | 'FAILED'
+  analysis        String? // JSON ReaderAnalysis (rempli au fil de l'eau, paragraphe par paragraphe)
+  analysisVersion String?
+  error           String?
+  createdAt       DateTime  @default(now())
+
+  progress ReadingProgress[]
+
+  @@index([userId, createdAt])
+  @@index([source])
+  @@index([userId, purpose, forDay])
+}
+
+/// Où en est un utilisateur dans un texte : réponses aux questions de structure, fin de lecture.
+model ReadingProgress {
+  userId      String
+  textId      Int
+  answers     String    @default("{}") // JSON { [questionId]: { choice, correct } }
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  text ReadingText @relation(fields: [textId], references: [id], onDelete: Cascade)
+
+  @@id([userId, textId])
+}
+
+/// Avancement dans le curriculum des 12 structures de lecture (src/lib/reader/curriculum.ts).
+model UnitProgress {
+  userId      String
+  unitId      String
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  score       Float? // part des questions de structure justes du premier coup sur les textes de l'unité
+
+  @@id([userId, unitId])
+}
+
+/// Répétition espacée (SM-2, src/lib/srs.ts) du Lecteur : mots gardés en lisant (avec leur phrase)
+/// et questions de structure déjà rencontrées. key = "w:<encounterId>" | "q:<textId>:<questionId>".
+model ReaderReview {
+  userId         String
+  key            String
+  ease           Float     @default(2.5)
+  intervalDays   Float     @default(0)
+  repetitions    Int       @default(0)
+  lapses         Int       @default(0)
+  dueAt          DateTime
+  lastReviewedAt DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@id([userId, key])
+  @@index([userId, dueAt])
 }

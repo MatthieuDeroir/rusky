@@ -154,6 +154,10 @@ export default async function ProfilPage() {
       <section className="glass rounded-3xl p-6">
         <h2 className="mb-4 font-medium">Ressources</h2>
         <div className="grid grid-cols-2 gap-2">
+          {/* Entraînements de la v2, passés au second plan depuis le pivot « Lire » (v3). */}
+          <ResourceLink href="/exercices" icon={<Award className="size-4" />} label="Exercices" />
+          <ResourceLink href="/objectif-b1" icon={<GraduationCap className="size-4" />} label="Objectif B1 (ТРКИ)" />
+          <ResourceLink href="/add" icon={<BookOpen className="size-4" />} label="Ajouter un mot" />
           <ResourceLink href="/reference" icon={<BookOpen className="size-4" />} label="Référence" />
           <ResourceLink href="/cas" icon={<Award className="size-4" />} label="Cas" />
           <ResourceLink href="/chiffres" icon={<Hash className="size-4" />} label="Chiffres" />

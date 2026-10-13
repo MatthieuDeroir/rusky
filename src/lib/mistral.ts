@@ -39,13 +39,18 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function chatJson<T>(messages: ChatMsg[], temperature = 0.2): Promise<T> {
+async function chatJson<T>(
+  messages: ChatMsg[],
+  temperature = 0.2,
+  modelName?: string,
+  backoffsMs: number[] = [600, 1800],
+): Promise<T> {
   const key = apiKey();
   if (!key) throw new Error("MISTRAL_API_KEY manquante");
   // 429 (rate limit) est transitoire : on absorbe avec un backoff court plutôt que de faire
   // remonter l'échec directement — observé en prod, le générateur lexgram (concurrence + retries)
   // déclenche facilement le rate limit et perdait sinon une tentative entière pour ça.
-  const BACKOFFS_MS = [600, 1800];
+  const BACKOFFS_MS = backoffsMs;
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(ENDPOINT, {
       method: "POST",
@@ -54,7 +59,7 @@ async function chatJson<T>(messages: ChatMsg[], temperature = 0.2): Promise<T> {
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: model(),
+        model: modelName ?? model(),
         temperature,
         response_format: { type: "json_object" },
         messages,
@@ -678,4 +683,57 @@ function normalizeRaterFeedback(raw: Partial<RaterFeedback>): RaterFeedback {
       : [],
     comment: raw.comment ? String(raw.comment) : undefined,
   };
+}
+
+// ---- Lecteur (v3 « Lire ») -------------------------------------------------------
+// Un appel = un paragraphe (ou un morceau de ≤ 5 phrases). Le prompt est construit dans
+// src/lib/reader/prompt.ts ; la sortie est validée contre le dictionnaire dans
+// src/lib/reader/analyze.ts. Température basse : on veut une analyse, pas de la créativité.
+
+/** Modèle du Lecteur (analyse + génération de textes) : le plus solide par défaut — la
+ * désambiguïsation des cas et la qualité des explications en dépendent directement. */
+function readerModel() {
+  return process.env.MISTRAL_READER_MODEL?.trim() || "mistral-large-latest";
+}
+
+// Le quota de mistral-large est serré : une séance lance d'un coup leçon + textes d'unité + texte
+// du jour + phrase. Tous les appels du Lecteur passent donc par une file (2 en vol max, par
+// instance) et absorbent les 429 avec des pauses longues plutôt que d'échouer.
+const READER_MAX_IN_FLIGHT = 2;
+const READER_BACKOFFS_MS = [2000, 5000, 12000, 25000];
+let readerInFlight = 0;
+const readerWaiting: (() => void)[] = [];
+
+async function readerCall<T>(messages: ChatMsg[], temperature: number): Promise<T> {
+  if (readerInFlight >= READER_MAX_IN_FLIGHT) await new Promise<void>((r) => readerWaiting.push(r));
+  readerInFlight++;
+  try {
+    return await chatJson<T>(messages, temperature, readerModel(), READER_BACKOFFS_MS);
+  } finally {
+    readerInFlight--;
+    readerWaiting.shift()?.();
+  }
+}
+
+/** Analyse brute (non validée) d'un morceau de texte pour le Lecteur. */
+export async function analyzeReadingChunk(systemPrompt: string, userPrompt: string): Promise<unknown> {
+  return readerCall<unknown>(
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    0.1,
+  );
+}
+
+/** Génère un texte de lecture (JSON { title, text } ou { sentences }) à partir d'un prompt déjà
+ * construit (src/lib/reader/generate.ts). Température plus haute : on veut de la variété. */
+export async function generateReadingText(systemPrompt: string, userPrompt: string): Promise<unknown> {
+  return readerCall<unknown>(
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    0.8,
+  );
 }

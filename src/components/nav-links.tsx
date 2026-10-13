@@ -3,14 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-// Accueil / Exercices / Collection / Objectif B1 / Profil (+ le CTA "Ajouter" à part). Référence,
-// Cas, Chiffres et Validation vivent désormais sous Profil (page "Ressources"). Objectif B1 est
-// son propre espace dédié (voir /home/mderoir/.claude/plans/robust-yawning-plum.md, §M).
+// Accueil / Séance / Lire / Mots / Profil (+ le CTA "Aujourd'hui" à part) — pivot « Lire » (v3).
+// Exercices, Objectif B1 et les ressources vivent sous Profil.
 const NAV: { href: string; label: string }[] = [
   { href: "/", label: "Accueil" },
-  { href: "/exercices", label: "Exercices" },
-  { href: "/collection", label: "Ma collection" },
-  { href: "/objectif-b1", label: "Objectif B1" },
+  { href: "/seance", label: "Séance" },
+  { href: "/lire", label: "Lire" },
+  { href: "/collection", label: "Mots" },
   { href: "/profil", label: "Profil" },
 ];
 
@@ -38,14 +37,14 @@ export function NavLinks() {
 
       {/* Highlighted call-to-action, distinct from the navigation tabs. */}
       <Link
-        href="/add"
+        href="/jour"
         className={`ml-1 rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors ${
-          isActive("/add")
+          isActive("/jour")
             ? "bg-primary text-primary-foreground shadow-sm"
             : "bg-primary/90 text-primary-foreground hover:bg-primary"
         }`}
       >
-        + Ajouter
+        Aujourd’hui
       </Link>
     </div>
   );

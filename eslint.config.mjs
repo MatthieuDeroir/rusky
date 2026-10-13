@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Nouvelle app, projet séparé avec son propre lint.
+    "rusky-b1/**",
   ]),
 ]);
 
