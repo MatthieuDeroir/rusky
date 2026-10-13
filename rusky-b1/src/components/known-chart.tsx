@@ -1,4 +1,5 @@
-import type { MonthPoint } from "@/lib/learn";
+import type { LevelDef, MonthPoint } from "@/lib/learn";
+import { cn } from "@/lib/utils";
 
 const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 const fmtLong = new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" });
@@ -25,29 +26,33 @@ const nf = (n: number) => Math.round(n).toLocaleString("fr-FR");
 export interface LevelEta {
   code: string;
   words: number;
+  scope: LevelDef["scope"];
   /** Mois où le seuil serait atteint au rythme moyen ; "atteint" ; null si rythme nul. */
   month: string | "atteint" | null;
 }
 
-/** Rythme moyen (mots B1 par mois depuis le premier mois actif, mois en cours au prorata) et mois
- * où chaque seuil de niveau serait atteint. `today` : "YYYY-MM-DD" (Paris). */
-export function levelEtas(points: MonthPoint[], levels: { code: string; words: number }[], today: string) {
+/** Rythmes moyens (mots par mois depuis le premier mois actif, mois en cours au prorata) — lexique
+ * B1 et tous les mots — et mois où chaque palier serait atteint. `today` : "YYYY-MM-DD" (Paris). */
+export function levelEtas(points: MonthPoint[], levels: LevelDef[], today: string) {
   const last = points[points.length - 1];
-  const firstActive = points.findIndex((p) => p.gained > 0);
+  const firstActive = points.findIndex((p) => p.allGained > 0);
   const [y, mo, d] = today.split("-").map(Number);
   const frac = d / new Date(Date.UTC(y, mo, 0)).getUTCDate();
   const elapsed = firstActive < 0 ? 0 : points.length - 1 - firstActive + frac;
   const pace = elapsed > 0 ? last.total / elapsed : 0;
+  const allPace = elapsed > 0 ? last.allTotal / elapsed : 0;
   const etas: LevelEta[] = levels
     .filter((l) => l.words > 0)
     .map((l) => {
-      if (last.total >= l.words) return { ...l, month: "atteint" };
-      if (pace <= 0) return { ...l, month: null };
-      // Mois écoulés depuis aujourd'hui ; la fin du mois en cours correspond à (1 - frac).
-      const months = (l.words - last.total) / pace;
+      const have = l.scope === "b1" ? last.total : last.allTotal;
+      const rate = l.scope === "b1" ? pace : allPace;
+      if (have >= l.words) return { ...l, month: "atteint" };
+      if (rate <= 0) return { ...l, month: null };
+      // Mois à partir d'aujourd'hui ; la fin du mois en cours correspond à (1 - frac).
+      const months = (l.words - have) / rate;
       return { ...l, month: addMonths(today.slice(0, 7), Math.max(0, Math.ceil(months - (1 - frac)))) };
     });
-  return { pace, etas };
+  return { pace, allPace, etas };
 }
 
 /** Mots connus par mois : le lexique B1 (ligne et barres vertes, « +n ») et, en pâle, tous les mots
@@ -61,8 +66,8 @@ export function KnownChart({
   points: MonthPoint[];
   target: number;
   today: string;
-  /** Seuils officiels de vocabulaire (A1 780, A2 1 300, B1 2 276). */
-  levels: { code: string; words: number }[];
+  /** Paliers de vocabulaire (A1 780 … C2 20 000). */
+  levels: LevelDef[];
 }) {
   const n = points.length;
   const W = PAD.left + PAD.right + STEP * Math.max(1, n - 1);
@@ -83,7 +88,9 @@ export function KnownChart({
     const bx = Math.min(Math.max(x(i) - w / 2, PAD.left - 10), W - PAD.right + 10 - w);
     return { x: bx, y: base - h, width: w, height: h };
   };
-  const { pace, etas } = levelEtas(points, levels, today);
+  const { pace, allPace, etas } = levelEtas(points, levels, today);
+  // Seuils dessinés : ceux qui tiennent dans l'échelle (au-delà de B1, quand tous les mots y arrivent).
+  const drawn = levels.filter((l) => l.words > 0 && l.words <= yMax);
 
   return (
     <figure className="space-y-3">
@@ -98,12 +105,26 @@ export function KnownChart({
             .join(", ")}`}
         >
           {/* Niveaux : seuils officiels de vocabulaire */}
-          {levels
-            .filter((l) => l.words > 0)
-            .map((l) => (
+          {drawn.map((l) => (
               <g key={l.code}>
-                <line x1={PAD.left} x2={W - PAD.right} y1={y(l.words)} y2={y(l.words)} stroke="var(--cobalt)" strokeWidth="1.5" strokeDasharray="3 7" opacity="0.45" />
-                <text x={W - PAD.right + 6} y={y(l.words) + 6} fontSize="17" fontWeight="600" fill="var(--cobalt)">
+                <line
+                  x1={PAD.left}
+                  x2={W - PAD.right}
+                  y1={y(l.words)}
+                  y2={y(l.words)}
+                  stroke="var(--cobalt)"
+                  strokeWidth="1.5"
+                  strokeDasharray="3 7"
+                  opacity={l.code.endsWith("+") ? 0.25 : 0.5}
+                />
+                <text
+                  x={W - PAD.right + 6}
+                  y={y(l.words) + 6}
+                  fontSize={l.code.endsWith("+") ? 14 : 17}
+                  fontWeight="600"
+                  fill="var(--cobalt)"
+                  opacity={l.code.endsWith("+") ? 0.7 : 1}
+                >
                   {l.code}
                 </text>
               </g>
@@ -153,18 +174,27 @@ export function KnownChart({
         </span>
       </figcaption>
       {pace > 0 && (
-        <div className="space-y-1 text-[17px]">
+        <div className="space-y-2 text-[17px]">
           <p>
-            Ton rythme moyen : <span className="font-semibold">{nf(pace)} mots du lexique B1 par mois</span>. À ce rythme :
+            Ton rythme moyen : <span className="font-semibold">{nf(pace)} mots du lexique B1 par mois</span> ({nf(allPace)} en
+            tout). À ce rythme :
           </p>
-          <ul className="space-y-0.5">
-            {etas.map((e) => (
-              <li key={e.code}>
-                <span className="font-semibold text-cobalt">{e.code}</span> ({nf(e.words)} mots) :{" "}
-                {e.month === "atteint" ? "atteint" : e.month ? monthLong(e.month) : "—"}
-              </li>
-            ))}
+          <ul className="grid grid-cols-[auto_auto_1fr] gap-x-3 gap-y-0.5">
+            {etas.map((e) => {
+              const plus = e.code.endsWith("+");
+              return (
+                <li key={e.code} className={cn("col-span-3 grid grid-cols-subgrid", plus && "text-[15px] text-muted")}>
+                  <span className="font-semibold text-cobalt">{e.code}</span>
+                  <span className="text-right tabular-nums text-muted">{nf(e.words)}</span>
+                  <span>{e.month === "atteint" ? "atteint" : e.month ? monthLong(e.month) : "—"}</span>
+                </li>
+              );
+            })}
           </ul>
+          <p className="text-[14px] text-faint">
+            Jusqu’à B1, les mots du lexique B1 ; au-delà, tous les mots connus. Les niveaux « + » sont des étapes
+            intermédiaires.
+          </p>
         </div>
       )}
     </figure>

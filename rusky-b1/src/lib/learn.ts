@@ -261,32 +261,52 @@ export async function keepWord(userId: string, entryId: number, context: string,
 // ---- Progrès ---------------------------------------------------------------------------
 
 export interface Level {
-  code: string; // 'pré-A1' | 'A1' | 'A2' | 'B1'
+  code: string; // 'pré-A1' | 'A1' | 'A1+' | 'A2' | … | 'C2'
   next: string | null;
   /** Ce qui manque pour le niveau suivant, en clair. */
   missing: string[];
 }
 
-/** Seuils officiels du vocabulaire (programmes de l'Institut Pouchkine) : ТЭУ/A1 780 mots,
- * ТБУ/A2 1 300, ТРКИ-1/B1 « jusqu’à 2 300 » : on prend le lexique B1 de l’app, 2 276 mots ; à l'examen, 66 % à
- * chaque épreuve, d'où le seuil de lecture. */
-export const LEVELS: { code: string; words: number; reading: number }[] = [
-  { code: "pré-A1", words: 0, reading: 0 },
-  { code: "A1", words: 780, reading: 0 },
-  { code: "A2", words: 1300, reading: 0.66 },
-  { code: "B1", words: 2276, reading: 0.66 },
+export interface LevelDef {
+  code: string;
+  words: number;
+  reading: number;
+  /** Mots comptés : le lexique B1 jusqu'à B1, tous les mots connus au-delà (le lexique s'arrête là). */
+  scope: "b1" | "all";
+}
+
+/** Paliers de vocabulaire. Officiels : ТЭУ/A1 780 mots, ТБУ/A2 1 300, ТРКИ-1/B1 « jusqu'à 2 300 »
+ * (ici le lexique B1 de l'app, 2 276), ТРКИ-2/B2 ~10 000, ТРКИ-3/C1 ~12 000, ТРКИ-4/C2 ~20 000.
+ * Les niveaux « + » sont à mi-chemin, pour voir avancer. À l'examen, 66 % à chaque épreuve, d'où
+ * le seuil de lecture. Les niveaux se suivent : un palier non atteint bloque les suivants. */
+export const LEVELS: LevelDef[] = [
+  { code: "pré-A1", words: 0, reading: 0, scope: "b1" },
+  { code: "A1", words: 780, reading: 0, scope: "b1" },
+  { code: "A1+", words: 1040, reading: 0, scope: "b1" },
+  { code: "A2", words: 1300, reading: 0.66, scope: "b1" },
+  { code: "A2+", words: 1788, reading: 0.66, scope: "b1" },
+  { code: "B1", words: 2276, reading: 0.66, scope: "b1" },
+  { code: "B1+", words: 6138, reading: 0.66, scope: "all" },
+  { code: "B2", words: 10000, reading: 0.66, scope: "all" },
+  { code: "B2+", words: 11000, reading: 0.66, scope: "all" },
+  { code: "C1", words: 12000, reading: 0.66, scope: "all" },
+  { code: "C1+", words: 16000, reading: 0.66, scope: "all" },
+  { code: "C2", words: 20000, reading: 0.66, scope: "all" },
 ];
 
-export function estimateLevel(knownB1: number, reading: number | null): Level {
+export function estimateLevel(knownB1: number, knownAll: number, reading: number | null): Level {
+  const count = (l: LevelDef) => (l.scope === "b1" ? knownB1 : knownAll);
   let i = 0;
-  for (let k = 0; k < LEVELS.length; k++) {
+  for (let k = 1; k < LEVELS.length; k++) {
     const l = LEVELS[k];
-    if (knownB1 >= l.words && (l.reading === 0 || (reading ?? 0) >= l.reading)) i = k;
+    if (count(l) >= l.words && (l.reading === 0 || (reading ?? 0) >= l.reading)) i = k;
+    else break;
   }
   const next = LEVELS[i + 1];
   const missing: string[] = [];
   if (next) {
-    if (knownB1 < next.words) missing.push(`${next.words - knownB1} mots du lexique B1`);
+    const n = next.words - count(next);
+    if (n > 0) missing.push(next.scope === "b1" ? `${n} mots du lexique B1` : `${n} mots connus en tout`);
     if (next.reading > 0 && (reading ?? 0) < next.reading)
       missing.push(`${Math.round(next.reading * 100)} % de réussite en lecture (actuellement ${reading === null ? "—" : Math.round(reading * 100) + " %"})`);
   }
@@ -351,7 +371,7 @@ export async function getProgress(userId: string): Promise<Progress> {
     knownAll,
     reading30,
     readingAnswers30: rt,
-    level: estimateLevel(knownB1, reading30),
+    level: estimateLevel(knownB1, knownAll, reading30),
     pacePerDay,
     projectedDate,
     examDate: settings.examDate,
