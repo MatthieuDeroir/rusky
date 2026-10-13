@@ -54,7 +54,8 @@ function shuffle<T>(xs: T[]): T[] {
  * Les 70 mots à réviser (lexique B1, connus ou en cours).
  * - 50 parmi les mots entrés dans le parcours depuis 7 jours, les moins récemment revus d'abord
  *   (d'une leçon à l'autre, ce ne sont pas toujours les mêmes) ; les mots simplement déclarés
- *   connus depuis la liste n'en font pas partie : ils n'ont pas été appris cette semaine.
+ *   connus depuis la liste ou importés de Duolingo n'en font pas partie : ils n'ont pas été appris
+ *   cette semaine dans l'app.
  * - 20 au hasard parmi tous les autres.
  * S'il y a moins de 50 mots récents, le hasard complète jusqu'à 70.
  */
@@ -65,7 +66,7 @@ export async function pickReviews(userId: string): Promise<number[]> {
   });
   const since = Date.now() - RECENT_DAYS * DAY_MS;
   const isRecent = (w: (typeof words)[number]) =>
-    w.firstSeenAt.getTime() >= since && !(w.origin === "manual" && w.status === "KNOWN");
+    w.firstSeenAt.getTime() >= since && !((w.origin === "manual" || w.origin === "duolingo") && w.status === "KNOWN");
   const recent = shuffle(words.filter(isRecent))
     .sort((a, b) => (a.lastReviewedAt?.getTime() ?? 0) - (b.lastReviewedAt?.getTime() ?? 0))
     .slice(0, RECENT_COUNT);
