@@ -23,7 +23,7 @@ export function Nav() {
         <nav className="mx-auto flex max-w-2xl items-center gap-1 px-4 py-3">
           <Link href="/" className="mr-auto rounded-xl" aria-label="Rusky, accueil">
             {/* eslint-disable-next-line @next/next/no-img-element -- SVG statique, pas d'optimisation utile */}
-            <img src="/logo.svg" alt="Rusky" width={36} height={36} className="size-9" />
+            <img src="/logo.svg" alt="Rusky" width={48} height={48} className="size-12" />
           </Link>
           {TABS.map((t) => (
             <Link

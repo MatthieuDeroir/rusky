@@ -42,6 +42,9 @@ export default async function TodayPage() {
   return (
     <div className="space-y-10">
       <header className="space-y-1">
+        {/* Sur téléphone, pas de barre en haut : le logo ouvre l'accueil. */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- SVG statique */}
+        <img src="/logo.svg" alt="Rusky" width={56} height={56} className="mb-3 size-14 sm:hidden" />
         <p className="text-muted first-letter:uppercase">{fmtDay.format(new Date())}</p>
         <h1 className="text-[32px] leading-tight font-semibold">
           {doneCount === 3 ? "Les trois leçons sont faites." : doneCount > 0 ? `${doneCount} leçon${doneCount > 1 ? "s" : ""} sur 3` : "Tes trois leçons du jour"}
