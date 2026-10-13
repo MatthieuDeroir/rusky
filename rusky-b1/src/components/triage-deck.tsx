@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { invalidateAction, markKnownAction } from "@/app/actions";
 import { Button, wordMeta } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { answerKey } from "@/lib/keys";
 
 export interface TriageCard {
   id: number;
@@ -143,15 +144,11 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
     // sa position (code) et son ancien code numérique (37/39 flèches, 100/102 pavé).
     const onKey = (e: KeyboardEvent) => {
       setLastKey(`key « ${e.key} », code « ${e.code} », keyCode ${e.keyCode}, location ${e.location}`);
-      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-      const k = e.keyCode;
-      const right =
-        ["ArrowRight", "Right", "6"].includes(e.key) || e.code === "Numpad6" || k === 39 || k === 102;
-      const left = ["ArrowLeft", "Left", "4"].includes(e.key) || e.code === "Numpad4" || k === 37 || k === 100;
-      if (!right && !left) return;
+      const r = answerKey(e);
+      if (!r) return;
       e.preventDefault();
       e.stopPropagation();
-      answer(right);
+      answer(r === "yes");
     };
     // Phase de capture : la touche est traitée avant tout autre élément de la page.
     document.addEventListener("keydown", onKey, true);
@@ -181,7 +178,7 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
       <header className="space-y-1">
         <h1 className="text-[28px] font-semibold">Trier le {label}</h1>
         <p className="text-muted">
-          Tu le connais ? Flèche droite (ou 6 du pavé numérique), ou glisse à droite. Sinon, flèche gauche (ou 4), ou glisse à gauche : il reste à
+          Tu le connais ? Flèche droite ou haut, D, ou glisse à droite. Sinon, flèche gauche ou bas, Q, ou glisse à gauche : il reste à
           apprendre, tes leçons s’en chargeront.
         </p>
       </header>

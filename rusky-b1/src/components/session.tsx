@@ -20,6 +20,7 @@ import type { Rating } from "@/lib/srs";
 import { Reader } from "@/components/reader";
 import { Button, LinkButton, wordMeta } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { answerKey } from "@/lib/keys";
 
 type Step = "review" | "known" | "new" | "done";
 const STEP_LABEL: Record<Exclude<Step, "done">, string> = {
@@ -177,19 +178,24 @@ function ReviewDeck({
   };
 
   useEffect(() => {
+    // Espace/Entrée : voir le sens, puis « je savais ». Flèches, D/Q, 6/4 du pavé : voir le sens,
+    // puis « je savais » (droite/haut/D/6) ou « à revoir » (gauche/bas/Q/4). 1/2 restent valables.
     const onKey = (e: KeyboardEvent) => {
       if (!card) return;
-      if (!shown && (e.key === " " || e.key === "Enter")) {
+      const r = answerKey(e);
+      if (!shown && (e.key === " " || e.key === "Enter" || r)) {
         e.preventDefault();
         setShown(true);
-      } else if (shown && e.key === "1") rate("again");
-      else if (shown && (e.key === "2" || e.key === " " || e.key === "Enter")) {
+      } else if (shown && (e.key === "1" || r === "no")) {
+        e.preventDefault();
+        rate("again");
+      } else if (shown && (e.key === "2" || e.key === " " || e.key === "Enter" || r === "yes")) {
         e.preventDefault();
         rate("good");
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   });
 
   if (!card) return null;
