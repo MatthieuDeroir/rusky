@@ -2,9 +2,10 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { parisDay } from "@/lib/dates";
 import { cardsFor, inList, LEXICONS, lexiconCoverage, listWhere, type Card } from "@/lib/learn";
+import { BASE_NEW_PER_LESSON, currentPlan, REVIEWS_PER_LESSON } from "@/lib/memory";
 
-/** Trois leçons par jour. Chacune : révisions → texte avec les mots connus → texte avec
- * 10 mots nouveaux. */
+/** Trois leçons par jour. Chacune : révisions → un texte à 90 % de mots connus, dont les autres
+ * sont les mots nouveaux du lexique en cours. */
 export const SLOTS = [
   { id: "matin", label: "Matin", of: "du matin", from: 0 },
   { id: "apres-midi", label: "Après-midi", of: "de l’après-midi", from: 12 },
@@ -12,14 +13,10 @@ export const SLOTS = [
 ] as const;
 export type SlotId = (typeof SLOTS)[number]["id"];
 
-/** Révisions d'une leçon : 50 mots parmi ceux appris cette semaine + 20 au hasard parmi tous. */
-export const REVIEW_TOTAL = 70;
-const RECENT_COUNT = 50;
-const RECENT_DAYS = 7;
-/** Mots nouveaux imposés au second texte de chaque leçon. */
-export const NEW_PER_LESSON = 10;
-const DAY_MS = 86_400_000;
-
+/** Mots nouveaux par leçon : la valeur de base (le plan réel dépend de la mémoire, voir memory.ts). */
+export const NEW_PER_LESSON = BASE_NEW_PER_LESSON;
+/** Révisions par leçon. */
+export const REVIEW_TOTAL = REVIEWS_PER_LESSON;
 export function isSlot(s: string | undefined | null): s is SlotId {
   return SLOTS.some((x) => x.id === s);
 }
@@ -51,41 +48,46 @@ function shuffle<T>(xs: T[]): T[] {
 }
 
 /**
- * Les 70 mots à réviser (lexique B1, connus ou en cours).
- * - 50 parmi les mots entrés dans le parcours depuis 7 jours, les moins récemment revus d'abord
- *   (d'une leçon à l'autre, ce ne sont pas toujours les mêmes) ; les mots simplement déclarés
- *   connus depuis la liste ou importés de Duolingo n'en font pas partie : ils n'ont pas été appris
- *   cette semaine dans l'app.
- * - 20 au hasard parmi les autres, d'abord ceux du lexique conseillé sur lequel on se concentre
- *   (le plus bas niveau incomplet).
- * S'il y a moins de 50 mots récents, le hasard complète jusqu'à 70.
+ * Les révisions d'une leçon (40), réparties entre mots appris et mots en cours selon le taux
+ * d'oubli (memory.ts : plus j'oublie, plus les mots appris reviennent).
+ * - En cours (dont les mots oubliés) : d'abord ceux dont l'échéance est arrivée (ratés la veille),
+ *   puis les plus souvent oubliés, puis les moins récemment revus.
+ * - Appris : d'abord ceux du lexique en cours (le plus bas niveau incomplet), les moins récemment
+ *   revus en premier, au hasard à égalité.
+ * Si une catégorie manque de mots, l'autre complète.
  */
 export async function pickReviews(userId: string): Promise<number[]> {
-  const [words, { focus }] = await Promise.all([
+  const [words, { focus }, plan] = await Promise.all([
     prisma.word.findMany({
-      where: { userId, entry: { b1Rank: { not: null } } },
+      // Mots des lexiques conseillés (A1, B1, B2 — les leçons enseignent le lexique en cours).
+      where: { userId, entry: listWhere("b2") },
       select: {
         entryId: true,
-        firstSeenAt: true,
-        lastReviewedAt: true,
-        origin: true,
         status: true,
+        dueAt: true,
+        lastReviewedAt: true,
+        forgetCount: true,
         entry: { select: { b1Rank: true, inA1Minimum: true, inB2Minimum: true } },
       },
     }),
     lexiconCoverage(userId),
+    currentPlan(userId),
   ]);
-  const since = Date.now() - RECENT_DAYS * DAY_MS;
-  const isRecent = (w: (typeof words)[number]) =>
-    w.firstSeenAt.getTime() >= since && !((w.origin === "manual" || w.origin === "duolingo") && w.status === "KNOWN");
-  const recent = shuffle(words.filter(isRecent))
-    .sort((a, b) => (a.lastReviewedAt?.getTime() ?? 0) - (b.lastReviewedAt?.getTime() ?? 0))
-    .slice(0, RECENT_COUNT);
-  const taken = new Set(recent.map((w) => w.entryId));
-  const rest = shuffle(words.filter((w) => !taken.has(w.entryId)));
+  const today = parisDay();
+  const seen = (w: (typeof words)[number]) => w.lastReviewedAt?.getTime() ?? 0;
+  const learning = shuffle(words.filter((w) => w.status !== "KNOWN")).sort(
+    (a, b) =>
+      Number(parisDay(b.dueAt) <= today) - Number(parisDay(a.dueAt) <= today) ||
+      b.forgetCount - a.forgetCount ||
+      seen(a) - seen(b),
+  );
   const inFocus = (w: (typeof words)[number]) => (focus ? inList(focus, w.entry) : false);
-  const others = [...rest.filter(inFocus), ...rest.filter((w) => !inFocus(w))].slice(0, REVIEW_TOTAL - recent.length);
-  return shuffle([...recent, ...others].map((w) => w.entryId));
+  const learned = shuffle(words.filter((w) => w.status === "KNOWN")).sort(
+    (a, b) => Number(inFocus(b)) - Number(inFocus(a)) || seen(a) - seen(b),
+  );
+  const nLearning = Math.min(learning.length, plan.reviewLearning + Math.max(0, plan.reviewLearned - learned.length));
+  const nLearned = Math.min(learned.length, REVIEW_TOTAL - nLearning);
+  return shuffle([...learning.slice(0, nLearning), ...learned.slice(0, nLearned)].map((w) => w.entryId));
 }
 
 /** Ouvre (ou reprend) une leçon : la liste des révisions est figée à la première ouverture. */
@@ -114,7 +116,8 @@ export async function remainingReviews(userId: string, lesson: { reviewIds: stri
 /** Les prochains mots pour le texte d'une leçon : jamais rencontrés, pas déjà réservés par le
  * texte d'une autre leçon du jour encore non lu, et pris dans le lexique conseillé du plus bas
  * niveau incomplet (A1, puis A2, B1, B2), les plus fréquents d'abord : on comble le lexique A1
- * même si le niveau A1 est déjà atteint en nombre de mots. */
+ * même si le niveau A1 est déjà atteint en nombre de mots. Combien : selon la mémoire (taux
+ * d'oubli, voir memory.ts). */
 export async function reserveNewWords(userId: string): Promise<number[]> {
   const pending = await prisma.text.findMany({
     where: {
@@ -127,14 +130,15 @@ export async function reserveNewWords(userId: string): Promise<number[]> {
     select: { newEntryIds: true },
   });
   const reserved = pending.flatMap((t) => JSON.parse(t.newEntryIds!) as number[]);
+  const { newPerLesson } = await currentPlan(userId);
   const picked: number[] = [];
   for (const l of LEXICONS) {
-    if (picked.length >= NEW_PER_LESSON) break;
+    if (picked.length >= newPerLesson) break;
     const entries = await prisma.dictionaryEntry.findMany({
       where: { AND: [listWhere(l.list), { words: { none: { userId } } }, { id: { notIn: [...reserved, ...picked] } }] },
       // Rang B1 = fréquence ; les mots hors lexique B1 (A1 ou B2 seuls) ensuite.
       orderBy: [{ b1Rank: { sort: "asc", nulls: "last" } }, { id: "asc" }],
-      take: NEW_PER_LESSON - picked.length,
+      take: newPerLesson - picked.length,
       select: { id: true },
     });
     picked.push(...entries.map((e) => e.id));
@@ -149,7 +153,6 @@ export interface LessonStatus {
   of: string;
   started: boolean;
   reviewsDone: boolean;
-  knownRead: boolean;
   newRead: boolean;
   done: boolean;
 }
@@ -175,9 +178,9 @@ export async function lessonsToday(userId: string): Promise<LessonStatus[]> {
       of: s.of,
       started: !!r,
       reviewsDone: !!r?.reviewsDoneAt,
-      knownRead: !!r?.knownTextId && read.has(r.knownTextId),
       newRead: !!r?.newTextId && read.has(r.newTextId),
-      done: !!r?.completedAt,
+      // Une leçon est faite quand son texte est lu (l'ancien texte « connu » n'existe plus).
+      done: !!r?.completedAt || (!!r?.newTextId && read.has(r.newTextId)),
     };
   });
 }

@@ -31,7 +31,7 @@ function message(slot: Slot, st: Awaited<ReturnType<typeof todayStatus>>): PushP
     const url = `/seance?lecon=${lessonId}`;
     switch (slot) {
       case "morning":
-        return { title: "Доброе утро !", body: "La leçon du matin t’attend : révisions, un texte facile, 10 mots nouveaux.", url, tag: "rusky-morning" };
+        return { title: "Доброе утро !", body: "La leçon du matin t’attend : révisions, puis un texte avec 10 mots nouveaux.", url, tag: "rusky-morning" };
       case "afternoon":
         return { title: "Добрый день !", body: "C’est l’heure de la leçon de l’après-midi.", url, tag: "rusky-afternoon" };
       default:

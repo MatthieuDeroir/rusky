@@ -141,6 +141,7 @@ if (!file) throw new Error("Chemin du fichier vocabulary.csv manquant");
         dueAt: new Date(now + (1 + (entryId % 21)) * DAY_MS),
         firstSeenAt: at,
         knownAt: at,
+        learnedAt: at,
         source: "Duolingo",
       };
     });
@@ -156,7 +157,7 @@ if (!file) throw new Error("Chemin du fichier vocabulary.csv manquant");
   for (const r of rows.filter((r) => had.has(r.entryId)))
     await prisma.word.update({
       where: { userId_entryId: { userId, entryId: r.entryId } },
-      data: { knownAt: r.knownAt, firstSeenAt: r.firstSeenAt },
+      data: { knownAt: r.knownAt, firstSeenAt: r.firstSeenAt, learnedAt: r.learnedAt },
     });
   console.log(`\nImport : ${added.count} ajoutés, ${stale.length} retirés (mal résolus), ${rows.length - added.count} conservés.`);
 })();

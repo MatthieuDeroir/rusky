@@ -38,8 +38,7 @@ export default async function SessionPage({ searchParams }: { searchParams: Prom
       of={slotOf(slot)}
       reviews={reviews}
       reviewTotal={(JSON.parse(lesson.reviewIds) as number[]).length}
-      knownRead={lesson.knownTextId !== null && read.has(lesson.knownTextId)}
-      newRead={lesson.newTextId !== null && read.has(lesson.newTextId)}
+      read={lesson.newTextId !== null && read.has(lesson.newTextId)}
       before={{ knownB1: progress.knownB1, b1Total: progress.b1Total, level: progress.level.code, streak: progress.streak }}
     />
   );

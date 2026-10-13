@@ -4,6 +4,7 @@ import { parisDay } from "@/lib/dates";
 import { activity, getProgress, getSettings, lexiconCoverage, lexiconGrid, knownByMonth, levelLadder } from "@/lib/learn";
 import { LevelLadder } from "@/components/level-ladder";
 import { a1Themes, paceComparison, weekReport } from "@/lib/motivation";
+import { hardWords, lessonPlan, memoryStats } from "@/lib/memory";
 import { KnownChart } from "@/components/known-chart";
 import { LevelRequirements } from "@/components/level-requirements";
 import { LexiconGrid } from "@/components/lexicon";
@@ -32,12 +33,16 @@ export default async function ProgressPage() {
   const focus = coverage.lexicons.find((l) => l.list === coverage.focus) ?? null;
   // Le tableau du haut suit le lexique du niveau en cours (A1, puis A2…), le dernier s'ils sont tous complets.
   const shown = focus ?? coverage.lexicons[coverage.lexicons.length - 1];
-  const [grid, themes, week, paces] = await Promise.all([
+  const [grid, themes, week, paces, memory, hard] = await Promise.all([
     lexiconGrid(userId, shown.list),
     shown.list === "a1" ? a1Themes(userId) : Promise.resolve([]),
     weekReport(userId),
     paceComparison(userId),
+    memoryStats(userId),
+    hardWords(userId),
   ]);
+  const plan = lessonPlan(memory);
+  const pctOf = (v: number | null) => (v === null ? "—" : `${Math.round(v * 100)} %`);
   // Thèmes les plus incomplets d'abord : là où sont les trous.
   const themesByGap = [...themes].sort((a, b) => a.known / a.size - b.known / b.size || b.size - a.size);
   const pct = Math.round((shown.known / shown.size) * 100);
@@ -116,6 +121,52 @@ export default async function ProgressPage() {
           </ul>
         </section>
       )}
+
+      <section className="space-y-3">
+        <h2 className="text-[22px] font-semibold">Mémoire</h2>
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            { label: "mots appris", value: memory.learned },
+            { label: "oubliés, à réapprendre", value: memory.forgottenNow },
+            { label: "taux d’oubli (14 j)", value: pctOf(memory.forgetRate) },
+            { label: "réussite des mots en cours (14 j)", value: pctOf(memory.learningSuccess) },
+          ].map((x) => (
+            <div key={x.label} className="rounded-2xl bg-surface p-3 shadow-[inset_0_0_0_1px_var(--line)]">
+              <dd className="text-[24px] font-semibold tabular-nums">{x.value}</dd>
+              <dt className="text-[13px] text-muted">{x.label}</dt>
+            </div>
+          ))}
+        </dl>
+        <p className="text-[15px] text-muted">
+          {memory.everForgotten} mot{memory.everForgotten > 1 ? "s" : ""} oublié{memory.everForgotten > 1 ? "s" : ""} au
+          moins une fois ({memory.forgetEvents} oubli{memory.forgetEvents > 1 ? "s" : ""} en tout), {memory.relearned} réappris.
+          Un mot oublié reste compté dans les mots appris.
+        </p>
+        <div className="rounded-2xl bg-surface px-4 py-3 shadow-[inset_0_0_0_1px_var(--line)]">
+          <p className="text-[17px]">
+            Chaque leçon : <span className="font-semibold">{plan.newPerLesson} mots nouveaux</span>,{" "}
+            {plan.reviewLearned + plan.reviewLearning} révisions ({plan.reviewLearned} mots appris, {plan.reviewLearning} en cours).
+          </p>
+          <p className="text-[15px] text-muted">{plan.reason}</p>
+        </div>
+        {hard.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-[17px] font-semibold">Les mots qui s’oublient le plus</h3>
+            <ul className="divide-y divide-line rounded-2xl bg-surface shadow-[inset_0_0_0_1px_var(--line)]">
+              {hard.map((w) => (
+                <li key={w.entryId} className="flex items-baseline justify-between gap-3 px-4 py-2">
+                  <span className="min-w-0 truncate">
+                    <span className="ru text-[18px]">{w.ru}</span> <span className="text-[15px] text-muted">{w.gloss}</span>
+                  </span>
+                  <span className="shrink-0 text-[14px] text-muted tabular-nums">
+                    oublié {w.forgetCount}×, réappris {w.relearnCount}×{w.known ? "" : " · à revoir"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
 
       <section className="space-y-2">
         <h2 className="text-[22px] font-semibold">Cette semaine</h2>

@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { currentUserId } from "@/lib/auth";
 import { getProgress, lexiconCoverage } from "@/lib/learn";
-import { fullDayStreak, nextStepGoal, weekReport, WORDS_PER_FULL_DAY } from "@/lib/motivation";
-import { lessonsToday, NEW_PER_LESSON, REVIEW_TOTAL, suggestedSlot } from "@/lib/lessons";
+import { fullDayStreak, nextStepGoal, weekReport } from "@/lib/motivation";
+import { currentPlan } from "@/lib/memory";
+import { lessonsToday, suggestedSlot } from "@/lib/lessons";
 import { LinkButton } from "@/components/ui";
 import { LexiconBar } from "@/components/lexicon";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,7 @@ export default async function TodayPage() {
     weekReport(userId),
     fullDayStreak(userId),
   ]);
+  const plan = await currentPlan(userId);
   // Le lexique du niveau en cours (A1, puis A2…), le dernier s'ils sont tous complets.
   const shown = coverage.lexicons.find((l) => l.list === coverage.focus) ?? coverage.lexicons[coverage.lexicons.length - 1];
   const next = suggestedSlot(lessons);
@@ -31,8 +33,9 @@ export default async function TodayPage() {
 
   const detail = (l: (typeof lessons)[number]) => {
     if (l.done) return "faite";
-    if (!l.started) return `${REVIEW_TOTAL} révisions, un texte connu, ${NEW_PER_LESSON} mots nouveaux`;
-    const left = [!l.reviewsDone && "révisions", !l.knownRead && "texte connu", !l.newRead && "mots nouveaux"].filter(Boolean);
+    if (!l.started)
+      return `${plan.reviewLearned + plan.reviewLearning} révisions, puis un texte (90 % de mots connus, ${plan.newPerLesson} nouveaux)`;
+    const left = [!l.reviewsDone && "révisions", !l.newRead && "texte"].filter(Boolean);
     return `en cours, reste : ${left.join(", ")}`;
   };
 
@@ -57,7 +60,7 @@ export default async function TodayPage() {
           <p className="text-[17px]">
             <span className="font-semibold text-cobalt">{goal.code}</span> dans{" "}
             <span className="font-semibold tabular-nums">{goal.missing}</span> mot{goal.missing > 1 ? "s" : ""} : avec les 3
-            leçons chaque jour ({WORDS_PER_FULL_DAY} mots), le <span className="font-semibold">{fmtShort(goal.atLessons)}</span>.
+            leçons chaque jour ({goal.perFullDay} mots), le <span className="font-semibold">{fmtShort(goal.atLessons)}</span>.
           </p>
           <p className="text-[15px] text-muted">
             {goal.atPace ? `À ton rythme moyen : le ${fmtShort(goal.atPace)}.` : ""}{" "}

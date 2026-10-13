@@ -139,7 +139,9 @@ async function bumpDay(userId: string, field: "newWords" | "reviews", n = 1) {
  * Résultat d'une carte.
  * - Nouveau mot, `known` : déclaré connu au tri → KNOWN, re-vérifié dans une semaine.
  * - Nouveau mot, `again`/`good` : entre en apprentissage (vu une première fois aujourd'hui).
- * - Révision : SM-2 ; réussi sur 2 jours → KNOWN ; raté → repasse LEARNING.
+ * - Révision : SM-2 ; réussi sur 2 jours → KNOWN ; raté → repasse LEARNING, son compteur repart
+ *   de zéro (deux jours de réussite à refaire) et il revient dans les révisions du lendemain — même
+ *   s'il avait déjà été réussi plus tôt dans la journée.
  */
 export async function recordAnswer(
   userId: string,
@@ -166,6 +168,7 @@ export async function recordAnswer(
         dueAt: known ? nextDueDate(state, now) : new Date(now.getTime() + DAY_MS),
         lastReviewedAt: now,
         knownAt: known ? now : null,
+        learnedAt: known ? now : null,
       },
     });
     await prisma.reviewLog.create({ data: { userId, entryId, rating: answer, isNew: true, day } });
@@ -176,10 +179,10 @@ export async function recordAnswer(
   const rating: Rating = answer === "known" ? "good" : answer;
   // Déjà révisé aujourd'hui (repassage dans la même séance) : on ne compte pas deux fois le jour.
   const sameDay = existing.lastReviewedAt && parisDay(existing.lastReviewedAt) === day;
-  // Déjà vu aujourd'hui (repassage dans la séance, séance supplémentaire) : simple entraînement,
-  // le planning fixé par la première réponse du jour ne bouge pas. On garde la trace.
-  if (sameDay) {
-    await prisma.reviewLog.create({ data: { userId, entryId, rating, day } });
+  // Déjà réussi aujourd'hui (autre leçon du jour) : simple entraînement, le planning fixé par la
+  // première réponse du jour ne bouge pas. Un échec, lui, compte toujours (voir plus bas).
+  if (sameDay && rating !== "again") {
+    await prisma.reviewLog.create({ data: { userId, entryId, rating, day, prevStatus: existing.status } });
     return { status: existing.status, becameKnown: false };
   }
   const prev: SrsState = {
@@ -188,9 +191,12 @@ export async function recordAnswer(
     repetitions: existing.repetitions,
     lapses: existing.lapses,
   };
-  const next = review(prev, rating);
+  const next = rating === "again" ? { ...review(prev, "again"), repetitions: 0 } : review(prev, rating);
   const known = rating !== "again" && next.repetitions >= KNOWN_AFTER_REPS;
   const status = known ? "KNOWN" : "LEARNING";
+  // Oubli : un mot appris (connu) raté. Réapprentissage : un mot oublié qui redevient connu.
+  const forgotten = rating === "again" && existing.status === "KNOWN";
+  const relearned = known && existing.status !== "KNOWN" && existing.forgetCount > 0;
   await prisma.word.update({
     where: { userId_entryId: { userId, entryId } },
     data: {
@@ -199,9 +205,13 @@ export async function recordAnswer(
       dueAt: rating === "again" ? new Date(now.getTime() + DAY_MS) : nextDueDate(next, now),
       lastReviewedAt: now,
       knownAt: known ? (existing.knownAt ?? now) : null,
+      // La date du premier apprentissage reste : un oubli ne retire pas le mot des mots appris.
+      learnedAt: existing.learnedAt ?? (known ? now : null),
+      ...(forgotten ? { forgetCount: { increment: 1 }, lastForgottenAt: now } : {}),
+      ...(relearned ? { relearnCount: { increment: 1 } } : {}),
     },
   });
-  await prisma.reviewLog.create({ data: { userId, entryId, rating, day } });
+  await prisma.reviewLog.create({ data: { userId, entryId, rating, day, prevStatus: existing.status } });
   await bumpDay(userId, "reviews");
   return { status, becameKnown: known && existing.status !== "KNOWN" };
 }
@@ -224,19 +234,30 @@ export async function setWordStatus(userId: string, entryId: number, known: bool
     };
     await prisma.word.upsert({
       where: { userId_entryId: { userId, entryId } },
-      update: data,
-      create: { userId, entryId, origin: "manual", firstSeenAt: now, ...data },
+      update: {
+        ...data,
+        learnedAt: existing?.learnedAt ?? now,
+        ...(existing && existing.forgetCount > 0 ? { relearnCount: { increment: 1 } } : {}),
+      },
+      create: { userId, entryId, origin: "manual", firstSeenAt: now, learnedAt: now, ...data },
     });
   } else {
     if (existing?.status === "LEARNING") return "LEARNING";
     const data = { status: "LEARNING", repetitions: 0, intervalDays: 0, dueAt: now, knownAt: null };
     await prisma.word.upsert({
       where: { userId_entryId: { userId, entryId } },
-      update: { ...data, lapses: { increment: 1 } },
+      // Un mot connu remis « à apprendre » : c'est un oubli.
+      update: {
+        ...data,
+        lapses: { increment: 1 },
+        ...(existing?.status === "KNOWN" ? { forgetCount: { increment: 1 }, lastForgottenAt: now } : {}),
+      },
       create: { userId, entryId, origin: "manual", firstSeenAt: now, ...data },
     });
   }
-  await prisma.reviewLog.create({ data: { userId, entryId, rating: known ? "manual-known" : "manual-unknown", day: parisDay(now) } });
+  await prisma.reviewLog.create({
+    data: { userId, entryId, rating: known ? "manual-known" : "manual-unknown", day: parisDay(now), prevStatus: existing?.status ?? null },
+  });
   return known ? "KNOWN" : "LEARNING";
 }
 
@@ -246,12 +267,12 @@ export async function setWordStatus(userId: string, entryId: number, known: bool
 export async function spreadKnownAt(userId: string, entryIds: number[]) {
   if (entryIds.length === 0) return;
   const known = await prisma.word.findMany({
-    where: { userId, status: "KNOWN", knownAt: { not: null }, entryId: { notIn: entryIds } },
-    select: { knownAt: true },
+    where: { userId, learnedAt: { not: null }, entryId: { notIn: entryIds } },
+    select: { learnedAt: true },
   });
   const weight = new Map<string, number>();
   for (const w of known) {
-    const m = parisDay(w.knownAt!).slice(0, 7);
+    const m = parisDay(w.learnedAt!).slice(0, 7);
     weight.set(m, (weight.get(m) ?? 0) + 1);
   }
   const months = [...weight.entries()].sort(([a], [b]) => a.localeCompare(b));
@@ -268,7 +289,10 @@ export async function spreadKnownAt(userId: string, entryIds: number[]) {
     const day = 1 + (((entryId * 40503) >>> 0) % last);
     await prisma.word.update({
       where: { userId_entryId: { userId, entryId } },
-      data: { knownAt: new Date(`${month}-${String(day).padStart(2, "0")}T10:00:00.000Z`) },
+      data: (() => {
+        const at = new Date(`${month}-${String(day).padStart(2, "0")}T10:00:00.000Z`);
+        return { knownAt: at, learnedAt: at };
+      })(),
     });
   }
 }
@@ -415,7 +439,7 @@ export async function lexiconCoverage(userId: string): Promise<{ lexicons: Lexic
   const [words, ...sizes] = await Promise.all([
     prisma.word.findMany({
       where: { userId },
-      select: { status: true, entry: { select: { b1Rank: true, inA1Minimum: true, inB2Minimum: true } } },
+      select: { learnedAt: true, entry: { select: { b1Rank: true, inA1Minimum: true, inB2Minimum: true } } },
     }),
     ...LEXICONS.map((l) => prisma.dictionaryEntry.count({ where: listWhere(l.list) })),
   ]);
@@ -424,8 +448,9 @@ export async function lexiconCoverage(userId: string): Promise<{ lexicons: Lexic
     return {
       ...l,
       size: sizes[i],
-      known: mine.filter((w) => w.status === "KNOWN").length,
-      learning: mine.filter((w) => w.status !== "KNOWN").length,
+      // Appris au moins une fois (un oubli ne fait pas reculer), et en cours jamais encore appris.
+      known: mine.filter((w) => w.learnedAt).length,
+      learning: mine.filter((w) => !w.learnedAt).length,
     };
   });
   return { lexicons, focus: lexicons.find((l) => l.known < l.size)?.list ?? null };
@@ -440,12 +465,12 @@ export interface LevelRung extends LevelDef {
 /** L'échelle des paliers (tous les mots connus) et le mois où chacun serait atteint au rythme
  * moyen (mots devenus connus par mois depuis le premier mois actif, mois en cours au prorata). */
 export async function levelLadder(userId: string): Promise<LevelRung[]> {
-  const words = await prisma.word.findMany({ where: { userId, status: "KNOWN" }, select: { knownAt: true } });
+  const words = await prisma.word.findMany({ where: { userId, learnedAt: { not: null } }, select: { learnedAt: true } });
   const known = words.length;
   const today = parisDay();
   const [y, mo, d] = today.split("-").map(Number);
   const frac = d / new Date(Date.UTC(y, mo, 0)).getUTCDate();
-  const first = words.filter((w) => w.knownAt).map((w) => parisDay(w.knownAt!).slice(0, 7)).sort()[0];
+  const first = words.map((w) => parisDay(w.learnedAt!).slice(0, 7)).sort()[0];
   const elapsed = first ? (y - Number(first.slice(0, 4))) * 12 + (mo - Number(first.slice(5, 7))) + frac : 0;
   const pace = elapsed > 0 ? known / elapsed : 0;
   const addMonths = (n: number) => {
@@ -483,9 +508,9 @@ export async function getProgress(userId: string): Promise<Progress> {
   const weekAgo = new Date(Date.now() - 7 * DAY_MS);
   const [b1Total, knownB1, learningB1, knownAll, reading, newWeek, settings, days] = await Promise.all([
     prisma.dictionaryEntry.count({ where: { b1Rank: { not: null } } }),
-    prisma.word.count({ where: { userId, status: "KNOWN", entry: { b1Rank: { not: null } } } }),
+    prisma.word.count({ where: { userId, learnedAt: { not: null }, entry: { b1Rank: { not: null } } } }),
     prisma.word.count({ where: { userId, status: "LEARNING", entry: { b1Rank: { not: null } } } }),
-    prisma.word.count({ where: { userId, status: "KNOWN" } }),
+    prisma.word.count({ where: { userId, learnedAt: { not: null } } }),
     prisma.dayLog.aggregate({
       where: { userId, day: { gte: since30 } },
       _sum: { readingRight: true, readingTotal: true },
@@ -548,11 +573,11 @@ export async function lexiconGrid(userId: string, list: LevelList = "b1"): Promi
   const entries = await prisma.dictionaryEntry.findMany({
     where: listWhere(list),
     orderBy: [{ b1Rank: { sort: "asc", nulls: "last" } }, { id: "asc" }],
-    select: { id: true, words: { where: { userId }, select: { status: true } } },
+    select: { id: true, words: { where: { userId }, select: { learnedAt: true } } },
   });
   return {
     ids: entries.map((e) => e.id),
-    states: entries.map((e) => (e.words[0] ? (e.words[0].status === "KNOWN" ? "2" : "1") : "0")).join(""),
+    states: entries.map((e) => (e.words[0] ? (e.words[0].learnedAt ? "2" : "1") : "0")).join(""),
   };
 }
 
@@ -570,14 +595,14 @@ export interface MonthPoint {
  * (en leçon : après deux jours de révisions réussies). */
 export async function knownByMonth(userId: string): Promise<MonthPoint[]> {
   const words = await prisma.word.findMany({
-    where: { userId, status: "KNOWN", knownAt: { not: null } },
-    select: { knownAt: true, entry: { select: { b1Rank: true, inA1Minimum: true, inB2Minimum: true } } },
+    where: { userId, learnedAt: { not: null } },
+    select: { learnedAt: true, entry: { select: { b1Rank: true, inA1Minimum: true, inB2Minimum: true } } },
   });
   const empty = (): Record<LevelList, number> => ({ a1: 0, a2: 0, b1: 0, b2: 0 });
   const allGained = new Map<string, number>();
   const lexGained = new Map<string, Record<LevelList, number>>();
   for (const w of words) {
-    const m = parisDay(w.knownAt!).slice(0, 7);
+    const m = parisDay(w.learnedAt!).slice(0, 7);
     allGained.set(m, (allGained.get(m) ?? 0) + 1);
     const g = lexGained.get(m) ?? empty();
     for (const l of LEXICONS) if (inList(l.list, w.entry)) g[l.list]++;

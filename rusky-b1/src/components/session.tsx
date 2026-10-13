@@ -22,11 +22,10 @@ import { Button, LinkButton, wordMeta } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { answerKey } from "@/lib/keys";
 
-type Step = "review" | "known" | "new" | "done";
+type Step = "review" | "read" | "done";
 const STEP_LABEL: Record<Exclude<Step, "done">, string> = {
   review: "Révisions",
-  known: "Texte connu",
-  new: "10 mots nouveaux",
+  read: "Texte",
 };
 
 interface Snapshot {
@@ -36,7 +35,8 @@ interface Snapshot {
   streak: number;
 }
 
-/** Une leçon : révisions → texte avec les mots connus → texte avec 10 mots nouveaux → bilan.
+/** Une leçon : révisions → un texte (90 % de mots connus, les autres sont les mots nouveaux du
+ * lexique en cours) → bilan avec les mots nouveaux.
  * Chaque réponse est enregistrée tout de suite : on peut quitter à tout moment sans rien perdre. */
 export function Session(props: SessionProps) {
   return (
@@ -53,28 +53,29 @@ interface SessionProps {
   /** Révisions restantes (toutes, sauf reprise après un rechargement). */
   reviews: Card[];
   reviewTotal: number;
-  knownRead: boolean;
-  newRead: boolean;
+  /** Texte de la leçon déjà lu (reprise). */
+  read: boolean;
   before: Snapshot;
 }
 
 function SessionInner(props: SessionProps) {
   // Figé à l'ouverture : une action serveur (revalidatePath) re-rend la page avec des données
   // recalculées — la leçon en cours ne doit ni perdre ses étapes ni son point de départ.
-  const [{ slot, of, reviews, reviewTotal, knownRead, newRead, before }] = useState(props);
-  // Textes de la leçon : demandés une seule fois à l'ouverture (ils s'écrivent pendant les révisions).
-  const [texts, setTexts] = useState<{ knownId: number; newId: number } | "failed" | null>(null);
+  const [{ slot, of, reviews, reviewTotal, read, before }] = useState(props);
+  // Texte de la leçon : demandé une seule fois à l'ouverture (il s'écrit pendant les révisions).
+  const [texts, setTexts] = useState<{ newId: number } | "failed" | null>(null);
   const asked = useRef(false);
   useEffect(() => {
     if (asked.current) return;
     asked.current = true;
     lessonTextsAction(slot).then(setTexts).catch(() => setTexts("failed"));
   }, [slot]);
-  const allSteps: Exclude<Step, "done">[] = ["review", "known", "new"];
-  const remaining = allSteps.filter((s) => (s === "review" ? reviews.length > 0 : s === "known" ? !knownRead : !newRead));
+  const allSteps: Exclude<Step, "done">[] = ["review", "read"];
+  const remaining = allSteps.filter((s) => (s === "review" ? reviews.length > 0 : !read));
   const [step, setStep] = useState<Step>(remaining[0] ?? "done");
   const [after, setAfter] = useState<Snapshot | null>(null);
   const [stats, setStats] = useState({ reviewed: 0, again: 0, learned: 0 });
+  const [newWords, setNewWords] = useState<Card[]>([]);
   const nextStep = useCallback(() => {
     if (step === "review") void lessonReviewsDoneAction(slot).catch(() => {});
     const i = remaining.indexOf(step as Exclude<Step, "done">);
@@ -92,7 +93,7 @@ function SessionInner(props: SessionProps) {
         .catch(() => {});
   }, [step, slot]);
 
-  const textId = texts && texts !== "failed" ? (step === "known" ? texts.knownId : texts.newId) : null;
+  const textId = texts && texts !== "failed" ? texts.newId : null;
 
   return (
     <div className="min-h-[80vh]">
@@ -123,7 +124,7 @@ function SessionInner(props: SessionProps) {
           onDone={nextStep}
         />
       )}
-      {(step === "known" || step === "new") &&
+      {step === "read" &&
         (texts === null ? (
           <p className="animate-pulse text-muted">Préparation du texte…</p>
         ) : texts === "failed" || textId === null ? (
@@ -131,18 +132,17 @@ function SessionInner(props: SessionProps) {
             <p>Le texte n’a pas pu être préparé. Tu peux passer à la suite ; il sera réécrit à ta prochaine ouverture de la leçon.</p>
             <Button onClick={nextStep}>Continuer</Button>
           </div>
-        ) : step === "known" ? (
-          <ReadStep
-            key="known"
+        ) : (
+          <NewTextStep
             textId={textId}
-            intro="Un texte écrit uniquement avec les mots que tu connais : lis-le d’une traite."
-            finishLabel="Texte suivant"
+            onLearned={(ws) => {
+              setNewWords(ws);
+              setStats((s) => ({ ...s, learned: ws.length }));
+            }}
             onDone={nextStep}
           />
-        ) : (
-          <NewTextStep key="new" textId={textId} onLearned={(n) => setStats((s) => ({ ...s, learned: n }))} onDone={nextStep} />
         ))}
-      {step === "done" && <Recap of={of} before={before} after={after} stats={stats} />}
+      {step === "done" && <Recap of={of} before={before} after={after} stats={stats} newWords={newWords} />}
     </div>
   );
 }
@@ -173,8 +173,8 @@ function ReviewDeck({
     save({ entryId: card.entryId, answer: r });
     onAnswered(r);
     setShown(false);
-    // Raté : il revient en fin de pile pour être revu avant la fin de la séance.
-    setQueue((q) => (r === "again" ? [...q.slice(1), q[0]] : q.slice(1)));
+    // Raté : il repasse en cours d'apprentissage et revient demain (pas de repassage aujourd'hui).
+    setQueue((q) => q.slice(1));
   };
 
   useEffect(() => {
@@ -273,50 +273,21 @@ function ReadStep({
 }
 
 /** Texte avec 10 mots nouveaux, puis la liste de ces mots (avec la phrase où ils apparaissent). */
-function NewTextStep({ textId, onLearned, onDone }: { textId: number; onLearned: (n: number) => void; onDone: () => void }) {
-  const [words, setWords] = useState<Card[] | null>(null);
-  const [phase, setPhase] = useState<"read" | "words">("read");
-  if (phase === "words")
-    return words === null ? (
-      <p className="animate-pulse text-muted">Les mots nouveaux…</p>
-    ) : (
-      <div className="space-y-6">
-        <div className="space-y-1">
-          <h2 className="text-[24px] font-semibold">{words.length} mots nouveaux</h2>
-          <p className="text-[15px] text-muted">Ils entrent dans tes révisions des prochaines leçons.</p>
-        </div>
-        <ul className="divide-y divide-line rounded-2xl bg-surface shadow-[inset_0_0_0_1px_var(--line)]">
-          {words.map((w) => (
-            <li key={w.entryId} className="space-y-1 px-4 py-3">
-              <p>
-                <span className="ru text-[21px]">{w.ru}</span>{" "}
-                <span className="text-[14px] text-faint">{wordMeta(w)}</span>
-              </p>
-              <p className="text-[17px]">{w.gloss}</p>
-              {w.context && <p className="ru text-[16px] text-muted">{w.context}</p>}
-            </li>
-          ))}
-        </ul>
-        <Button size="lg" className="w-full sm:w-auto" onClick={onDone}>
-          Terminer la leçon
-        </Button>
-      </div>
-    );
+function NewTextStep({ textId, onLearned, onDone }: { textId: number; onLearned: (words: Card[]) => void; onDone: () => void }) {
+  const [finishing, setFinishing] = useState(false);
+  if (finishing) return <p className="animate-pulse text-muted">Fin de la leçon…</p>;
   return (
     <ReadStep
       textId={textId}
-      intro="Ce texte introduit 10 mots nouveaux (bouton « Mots nouveaux » pour les repérer). Touche un mot pour voir son sens."
-      finishLabel="Voir les mots nouveaux"
+      intro="Presque tous les mots te sont connus ; les autres sont les mots nouveaux de la leçon (bouton « Mots nouveaux » pour les repérer). Touche un mot pour voir son sens."
+      finishLabel="Terminer la leçon"
       onDone={() => {
-        setPhase("words");
+        setFinishing(true);
         textNewWordsAction(textId)
-          .then((ws) => {
-            // Seuls les mots vraiment présents dans le texte (et donc ajoutés) sont listés.
-            const learned = ws.filter((w) => w.context);
-            setWords(learned);
-            onLearned(learned.length);
-          })
-          .catch(() => setWords([]));
+          // Seuls les mots vraiment présents dans le texte (et donc ajoutés) sont listés.
+          .then((ws) => onLearned(ws.filter((w) => w.context)))
+          .catch(() => {})
+          .finally(onDone);
       }}
     />
   );
@@ -329,11 +300,13 @@ function Recap({
   before,
   after,
   stats,
+  newWords,
 }: {
   of: string;
   before: Snapshot;
   after: Snapshot | null;
   stats: { reviewed: number; again: number; learned: number };
+  newWords: Card[];
 }) {
   const gained = after ? after.knownB1 - before.knownB1 : 0;
   return (
@@ -351,7 +324,7 @@ function Recap({
         </h1>
         {after && (
           <p className="text-[19px] text-muted">
-            {gained > 0 ? `+${gained} pendant cette leçon.` : "Les mots nouveaux deviendront « connus » après des révisions réussies sur deux jours."}
+            {gained > 0 ? `+${gained} pendant cette leçon.` : "Les mots nouveaux deviendront « connus » après des révisions réussies sur deux jours ; un mot raté repart de zéro."}
             {after.level !== before.level ? ` Niveau estimé : ${before.level} → ${after.level}.` : ""}
           </p>
         )}
@@ -362,6 +335,23 @@ function Recap({
         <Stat label="à revoir" value={stats.again} />
         <Stat label="mots nouveaux" value={stats.learned} />
       </dl>
+
+      {newWords.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-[19px] font-semibold">Les mots nouveaux de la leçon</h2>
+          <p className="text-[15px] text-muted">Ils reviendront dans tes révisions.</p>
+          <ul className="divide-y divide-line rounded-2xl bg-surface shadow-[inset_0_0_0_1px_var(--line)]">
+            {newWords.map((w) => (
+              <li key={w.entryId} className="space-y-0.5 px-4 py-2.5">
+                <p>
+                  <span className="ru text-[19px]">{w.ru}</span> <span className="text-[16px]">{w.gloss}</span>
+                </p>
+                {w.context && <p className="ru text-[15px] text-muted">{w.context}</p>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {after && after.streak > 0 && (
         <p className="text-[17px]">

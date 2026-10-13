@@ -132,8 +132,10 @@ export async function createDailyText(userId: string, { fresh = false } = {}): P
 export const TARGET_COVERAGE = 0.85;
 const MAX_ATTEMPTS = 2;
 const NEW_WORDS_PER_TEXT = 4;
-/** Texte de leçon : 10 mots nouveaux imposés ; on accepte qu'un seul manque. */
-const LESSON_ATTEMPTS = 3;
+/** Texte de leçon : 10 mots nouveaux imposés (on accepte qu'un seul manque), et au moins 90 % de
+ * mots CONNUS — les mots nouveaux sont les 10 % restants. */
+const LESSON_ATTEMPTS = 6;
+const LESSON_COVERAGE = 0.9;
 const MAX_MISSING = 1;
 /** Entraînement « mots connus » : presque tout doit être connu. */
 const PRACTICE_COVERAGE = 0.95;
@@ -150,36 +152,41 @@ export async function fillGeneratedText(textId: number, userId: string, mode: Te
     const row = await prisma.text.findUnique({ where: { id: textId }, select: { newEntryIds: true } });
     // Texte de leçon : les mots nouveaux sont fixés à la création (réservés pour cette leçon).
     const imposed = !practice && row?.newEntryIds ? (JSON.parse(row.newEntryIds) as number[]) : null;
+    // Vocabulaire strict (mots connus seulement) : entraînement, et texte de leçon (+ ses mots nouveaux).
+    const strict = practice || !!imposed;
     const [knownB1, mine, upcoming, familiar] = await Promise.all([
       prisma.word.count({ where: { userId, status: "KNOWN", entry: { b1Rank: { not: null } } } }),
       // Texte du jour : le vocabulaire B1 de l'apprenant (connu + en cours) — c'est sur lui que
       // l'examen porte. Entraînement : seulement les mots CONNUS (B1 d'abord, puis les autres).
       prisma.word.findMany({
-        where: practice ? { userId, status: "KNOWN" } : { userId, entry: { b1Rank: { not: null } } },
+        where: strict ? { userId, status: "KNOWN" } : { userId, entry: { b1Rank: { not: null } } },
         orderBy: { entry: { b1Rank: { sort: "asc", nulls: "last" } } },
-        take: 900,
+        take: strict ? 1200 : 900,
         select: { status: true, entry: { select: { bare: true } } },
       }),
       // Les prochains mots du parcours : ceux que le texte du jour introduit.
       practice
-        ? Promise.resolve([] as { id: number; bare: string; glossFr: string | null }[])
+        ? Promise.resolve([] as { id: number; bare: string; glossFr: string | null; translationsFr: string | null }[])
         : prisma.dictionaryEntry.findMany({
             where: imposed ? { id: { in: imposed } } : { b1Rank: { not: null }, words: { none: { userId } } },
             orderBy: { b1Rank: "asc" },
             take: imposed ? imposed.length : NEW_WORDS_PER_TEXT,
-            select: { id: true, bare: true, glossFr: true },
+            select: { id: true, bare: true, glossFr: true, translationsFr: true },
           }),
-      familiarEntryIds(userId, practice ? { knownOnly: true } : { b1Only: true }),
+      familiarEntryIds(userId, strict ? { knownOnly: true } : { b1Only: true }),
     ]);
     const brief = levelBrief(knownB1);
     // Texte du jour : autorisés sans pénalité les mots familiers, les mots imposés et les mots les
     // plus fréquents du B1 (appris dans les jours qui viennent). Entraînement : les mots connus seuls.
-    const frequent = practice
+    const frequent = strict
       ? []
       : await prisma.dictionaryEntry.findMany({ where: { b1Rank: { lt: FREE_RANK } }, select: { id: true } });
-    const allowed = new Set([...familiar, ...upcoming.map((u) => u.id), ...frequent.map((f) => f.id)]);
-    const target = practice ? PRACTICE_COVERAGE : TARGET_COVERAGE;
+    // Texte de leçon : la couverture se mesure sur les mots CONNUS seuls ; les mots nouveaux imposés
+    // en font partie des 10 % restants.
+    const allowed = new Set([...familiar, ...(imposed ? [] : upcoming.map((u) => u.id)), ...frequent.map((f) => f.id)]);
+    const target = practice ? PRACTICE_COVERAGE : imposed ? LESSON_COVERAGE : TARGET_COVERAGE;
     const attempts = practice ? 3 : imposed ? LESSON_ATTEMPTS : MAX_ATTEMPTS;
+    const gloss = (u: (typeof upcoming)[number]) => u.glossFr ?? u.translationsFr?.split(/[,;]/)[0] ?? "?";
 
     const day = parisDay();
     // Un thème différent pour chaque texte : du jour (par date), d'entraînement (par nombre).
@@ -188,7 +195,20 @@ export async function fillGeneratedText(textId: number, userId: string, mode: Te
       : await prisma.text.count({ where: { userId, forDay: day, source: "generated", id: { lt: textId } } });
     const theme = THEMES[([...day].reduce((a, c) => a + c.charCodeAt(0), 0) + rank * 5 + (practice ? 3 : 0)) % THEMES.length];
     const user = (
-      practice
+      imposed
+        ? [
+            `Thème : ${theme} (adapte librement le thème au vocabulaire disponible).`,
+            `Longueur : 120 à 160 mots. Grammaire : ${brief.grammar}.`,
+            "But : un texte de LEÇON. Au moins 90 % des mots doivent être des mots que l'apprenant connaît déjà ; les autres sont les mots nouveaux obligatoires ci-dessous.",
+            "Vocabulaire — règle stricte : en dehors des mots nouveaux obligatoires, n'emploie QUE les mots de la liste des mots connus (toutes formes fléchies permises), plus les mots-outils (prépositions, conjonctions, pronoms, particules) et des prénoms. Aucun autre mot plein.",
+            `MOTS NOUVEAUX OBLIGATOIRES — emploie CHACUN de ces ${upcoming.length} mots au moins une fois (forme fléchie permise), dans une phrase où le contexte aide à deviner le sens : ${upcoming
+              .map((u) => `${u.bare} (${gloss(u)})`)
+              .join(", ")}.`,
+            "S'il manque un mot pour une idée, change d'idée ou fais une phrase plus simple : le texte doit rester naturel et logique.",
+            `Mots que l'apprenant connaît : ${mine.map((w) => w.entry.bare).join(", ")}.`,
+            "Les questions et les options n'emploient aussi que ces mots (et les mots nouveaux).",
+          ]
+        : practice
         ? [
             `Thème : ${theme} (adapte librement le thème au vocabulaire disponible).`,
             `Longueur : 60 à 120 mots. Grammaire : ${brief.grammar}.`,
@@ -230,8 +250,10 @@ export async function fillGeneratedText(textId: number, userId: string, mode: Te
       console.log(
         `[texts] ${textId} essai ${attempt + 1} : couverture ${Math.round(ratio(cov) * 100)} %${imposed ? `, ${missing.length} mot(s) imposé(s) absent(s)` : ""}`,
       );
-      // Meilleur essai : le moins de mots imposés manquants, puis la meilleure couverture.
-      if (!best || missing.length < best.missing || (missing.length === best.missing && ratio(cov) > best.coverage))
+      // Meilleur essai : d'abord celui qui atteint la couverture visée, puis le moins de mots
+      // imposés manquants, puis la meilleure couverture.
+      const score = (c: number, m: number) => (c >= target ? 0 : 1000) + m * 10 - c;
+      if (!best || score(ratio(cov), missing.length) < score(best.coverage, best.missing))
         best = { out, questions, coverage: ratio(cov), missing: missing.length };
       if (ratio(cov) >= target && missing.length <= MAX_MISSING) break;
       // Essai suivant : réviser CE texte en remplaçant précisément les mots hors liste — bien plus
@@ -242,9 +264,12 @@ export async function fillGeneratedText(textId: number, userId: string, mode: Te
         "Voici ta version précédente :",
         JSON.stringify({ title: out.title, text: out.text, questions: out.questions }),
         `Ces mots sont trop difficiles pour l'apprenant : ${cov.unknown.filter((w) => !upcoming.some((u) => u.bare === w)).join(", ")}.`,
+        imposed
+          ? `Ton texte a ${cov.total} mots dont ${cov.known} connus (${Math.round(ratio(cov) * 100)} %) : il en faut au moins ${Math.ceil(cov.total * target)}. Retire ou remplace au moins ${Math.max(1, Math.ceil(cov.total * target) - cov.known)} mots inconnus (pas les mots nouveaux obligatoires) ; des phrases plus courtes et plus simples sont bienvenues.`
+          : "",
         missing.length ? `Tu as oublié ces mots nouveaux obligatoires, ajoute-les : ${missing.map((u) => u.bare).join(", ")}.` : "",
-        practice
-          ? "Remplace chacun d'eux par un mot de la liste, ou réécris la phrase autrement avec les mots de la liste (ou supprime-la). Le texte doit rester naturel et logique. Même format JSON."
+        strict
+          ? "Remplace chacun d'eux par un mot de la liste des mots connus, ou réécris la phrase autrement avec ces mots (ou supprime-la). Ne touche pas aux mots nouveaux obligatoires. Le texte doit rester naturel et logique. Même format JSON."
           : "Remplace ceux que tu peux par un mot plus simple ou courant, sans rendre une phrase bizarre : si un remplacement abîme le sens, garde le mot. Garde l'histoire, sa logique et le naturel. Même format JSON.",
       ].join("\n");
     }

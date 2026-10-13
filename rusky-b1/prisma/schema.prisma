@@ -132,6 +132,13 @@ model Word {
   lastReviewedAt DateTime?
   firstSeenAt   DateTime  @default(now())
   knownAt       DateTime?
+  /// Premier passage à « connu » : ne s'efface jamais (un oubli ne retire pas un mot des mots appris).
+  learnedAt     DateTime?
+  /// Fois où le mot, déjà appris, a été raté en révision (oublié).
+  forgetCount   Int       @default(0)
+  /// Fois où il a été réappris après un oubli.
+  relearnCount  Int       @default(0)
+  lastForgottenAt DateTime?
   source        String? // texte / origine
   context       String? // phrase où le mot a été rencontré
 
@@ -151,6 +158,8 @@ model ReviewLog {
   rating  String // 'again' | 'good' | 'easy' | 'known' (tri)
   /// true = le mot était nouveau (première rencontre dans le parcours).
   isNew   Boolean  @default(false)
+  /// Statut du mot avant la réponse ('KNOWN' | 'LEARNING') : sert au taux d'oubli.
+  prevStatus String?
   day     String // "YYYY-MM-DD" Europe/Paris
   at      DateTime @default(now())
 

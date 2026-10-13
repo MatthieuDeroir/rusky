@@ -2,14 +2,13 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { parisDay } from "@/lib/dates";
 import { LEVELS } from "@/lib/learn";
-import { NEW_PER_LESSON, SLOTS } from "@/lib/lessons";
+import { SLOTS } from "@/lib/lessons";
+import { currentPlan } from "@/lib/memory";
 import themes from "@/lib/a1-themes.json";
 import { analysisCoverage, familiarEntryIds } from "@/lib/coverage";
 import type { ReaderAnalysis } from "@/lib/reader/types";
 
 const DAY_MS = 86_400_000;
-/** Mots nouveaux par jour quand les trois leçons sont faites. */
-export const WORDS_PER_FULL_DAY = NEW_PER_LESSON * SLOTS.length;
 
 function addDays(day: string, n: number): string {
   return parisDay(new Date(Date.parse(day + "T12:00:00Z") + n * DAY_MS));
@@ -17,8 +16,9 @@ function addDays(day: string, n: number): string {
 
 /** Rythme moyen observé (tous les mots connus par jour), depuis le premier mot daté. */
 async function knownPace(userId: string) {
-  const words = await prisma.word.findMany({ where: { userId, status: "KNOWN" }, select: { knownAt: true } });
-  const dates = words.filter((w) => w.knownAt).map((w) => w.knownAt!.getTime());
+  // Mots appris (au moins une fois) : un oubli ne fait pas reculer le compte.
+  const words = await prisma.word.findMany({ where: { userId, learnedAt: { not: null } }, select: { learnedAt: true } });
+  const dates = words.map((w) => w.learnedAt!.getTime());
   const first = dates.length ? Math.min(...dates) : Date.now();
   const days = Math.max(1, (Date.now() - first) / DAY_MS);
   return { known: words.length, perDay: words.length / days, dates };
@@ -28,7 +28,8 @@ export interface StepGoal {
   code: string;
   need: number;
   missing: number;
-  /** Date en faisant les trois leçons chaque jour (30 mots nouveaux par jour). */
+  /** Mots nouveaux par jour avec les trois leçons (selon la mémoire), et la date à ce rythme. */
+  perFullDay: number;
   atLessons: string;
   /** Date au rythme moyen observé (null : pas encore de rythme). */
   atPace: string | null;
@@ -36,16 +37,18 @@ export interface StepGoal {
 
 /** Objectif du jour : le prochain palier (− et + compris) et quand l'atteindre. */
 export async function nextStepGoal(userId: string): Promise<StepGoal | null> {
-  const { known, perDay } = await knownPace(userId);
+  const [{ known, perDay }, plan] = await Promise.all([knownPace(userId), currentPlan(userId)]);
   const next = LEVELS.find((l) => l.need > known);
   if (!next) return null;
   const missing = next.need - known;
   const today = parisDay();
+  const perFullDay = plan.newPerLesson * SLOTS.length;
   return {
     code: next.code,
     need: next.need,
     missing,
-    atLessons: addDays(today, Math.ceil(missing / WORDS_PER_FULL_DAY)),
+    perFullDay,
+    atLessons: addDays(today, Math.ceil(missing / perFullDay)),
     atPace: perDay > 0 ? addDays(today, Math.ceil(missing / perDay)) : null,
   };
 }
@@ -88,9 +91,10 @@ export interface ThemeCoverage {
 export async function a1Themes(userId: string): Promise<ThemeCoverage[]> {
   const words = await prisma.word.findMany({
     where: { userId, entry: { inA1Minimum: true } },
-    select: { status: true, entry: { select: { bare: true } } },
+    select: { learnedAt: true, entry: { select: { bare: true } } },
   });
-  const status = new Map(words.map((w) => [w.entry.bare, w.status]));
+  // Appris (au moins une fois) ou en cours.
+  const status = new Map(words.map((w) => [w.entry.bare, w.learnedAt ? "KNOWN" : "LEARNING"]));
   return (themes as { id: string; title: string; words: string[] }[]).map((t) => ({
     id: t.id,
     title: t.title,

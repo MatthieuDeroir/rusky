@@ -99,10 +99,10 @@ export async function textStateAction(id: number): Promise<TextState> {
   };
 }
 
-/** Les deux textes d'une leçon : avec les mots connus, puis avec 10 mots nouveaux. Créés à la
- * première demande et écrits en tâche de fond pendant les révisions ; un rechargement de la page
- * renvoie les mêmes. Un texte en échec est remplacé. */
-export async function lessonTextsAction(slot: SlotId): Promise<{ knownId: number; newId: number }> {
+/** Le texte d'une leçon : 90 % de mots connus, les autres sont les mots nouveaux du lexique en
+ * cours. Créé à la première demande et écrit en tâche de fond pendant les révisions ; un
+ * rechargement de la page renvoie le même. Un texte en échec est remplacé. */
+export async function lessonTextsAction(slot: SlotId): Promise<{ newId: number }> {
   const userId = await currentUserId();
   if (!isSlot(slot)) throw new Error("Leçon inconnue");
   const key = { userId_day_slot: { userId, day: parisDay(), slot } };
@@ -137,9 +137,8 @@ export async function lessonTextsAction(slot: SlotId): Promise<{ knownId: number
     after(() => fillGeneratedText(t.id, userId, practice ? "known" : "level"));
     return t.id;
   };
-  const knownId = await ensure("knownTextId");
   const newId = await ensure("newTextId");
-  return { knownId, newId };
+  return { newId };
 }
 
 /** Révisions de la leçon terminées. */
