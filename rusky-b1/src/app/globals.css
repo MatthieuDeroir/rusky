@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/* Rusky B1 — encre sur papier froid, un seul accent (cobalt) pour les actions ;
+   vert = connu, ambre = en cours. Le russe se lit en Literata, l'interface en Golos Text. */
+:root {
+  --paper: #f6f7f9;
+  --surface: #ffffff;
+  --sunk: #eceef3;
+  --ink: #191c27;
+  --muted: #5f6577;
+  --faint: #9aa0b0;
+  --line: #dfe2ea;
+  --cobalt: #3046e8;
+  --cobalt-ink: #ffffff;
+  --cobalt-soft: #e6e9fd;
+  --known: #17945f;
+  --known-soft: #dcf2e7;
+  --learning: #c98a10;
+  --learning-soft: #fbefd2;
+  --wrong: #c8352e;
+  --wrong-soft: #f9e0de;
+  --cell-empty: #dfe2ea;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #10121a;
+    --surface: #181b26;
+    --sunk: #0b0d13;
+    --ink: #e9ebf3;
+    --muted: #a3a9ba;
+    --faint: #6c7286;
+    --line: #2a2e3d;
+    --cobalt: #7c8cff;
+    --cobalt-ink: #0d1030;
+    --cobalt-soft: #20264d;
+    --known: #3ccf8e;
+    --known-soft: #12321f;
+    --learning: #f0b43c;
+    --learning-soft: #3a2c0c;
+    --wrong: #ff6f66;
+    --wrong-soft: #3d1715;
+    --cell-empty: #262a38;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-sunk: var(--sunk);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-cobalt: var(--cobalt);
+  --color-cobalt-ink: var(--cobalt-ink);
+  --color-cobalt-soft: var(--cobalt-soft);
+  --color-known: var(--known);
+  --color-known-soft: var(--known-soft);
+  --color-learning: var(--learning);
+  --color-learning-soft: var(--learning-soft);
+  --color-wrong: var(--wrong);
+  --color-wrong-soft: var(--wrong-soft);
+  --font-sans: var(--font-golos);
+  --font-ru: var(--font-literata);
+}
+
+html {
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-golos), system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.5;
+  font-feature-settings: "tnum" 0;
+}
+
+/* Le russe : un peu plus grand, plus d'interligne (serif). */
+.ru {
+  font-family: var(--font-literata), Georgia, serif;
+  line-height: 1.6;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

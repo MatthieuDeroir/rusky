@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["dub1"],
+  "crons": [
+    { "path": "/api/cron/remind?slot=morning", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/remind?slot=morning", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/remind?slot=afternoon", "schedule": "0 12 * * *" },
+    { "path": "/api/cron/remind?slot=afternoon", "schedule": "0 13 * * *" },
+    { "path": "/api/cron/remind?slot=evening", "schedule": "0 17 * * *" },
+    { "path": "/api/cron/remind?slot=evening", "schedule": "0 18 * * *" },
+    { "path": "/api/cron/remind?slot=night", "schedule": "0 21 * * *" },
+    { "path": "/api/cron/remind?slot=night", "schedule": "0 22 * * *" }
+  ]
+}

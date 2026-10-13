@@ -1,0 +1,5 @@
+# Bases locales et sauvegardes : jamais envoyées à Vercel.
+prisma/*.db
+prisma/*.db-*
+prisma/backups
+src/generated

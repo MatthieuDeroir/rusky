@@ -1,0 +1,256 @@
+// Rusky B1 — modèle de données.
+// Dictionnaire (DictionaryEntry / DictionaryForm) : référence, copiée depuis l'ancienne app.
+// Données de l'utilisateur : un état par lemme (Word), un journal (ReviewLog, DayLog), les textes.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+/// Un lemme du dictionnaire (OpenRussian + compléments). Jamais modifié par l'utilisateur.
+model DictionaryEntry {
+  id             Int     @id
+  bare           String // sans accent, minuscule, ё → е
+  accented       String // avec accent tonique (apostrophe après la voyelle)
+  type           String // 'noun' | 'verb' | 'adjective' | 'pronoun' | 'numeral' | 'other'
+  gender         String?
+  aspect         String?
+  animate        Boolean?
+  indeclinable   Boolean?
+  sgOnly         Boolean?
+  plOnly         Boolean?
+  comparative    String?
+  superlative    String?
+  partner        String?
+  translationsFr String?
+  translationsEn String?
+  inB1Minimum    Boolean @default(false) // Lexique minimum B1 (ТРКИ-1)
+  /// Rang dans le parcours B1 (ordre d'apprentissage, familles d'homonymes groupées). Null hors B1.
+  b1Rank         Int?
+  /// Carte vérifiée (passe IA sur les mots B1) : sens courant court + phrase d'exemple.
+  glossFr        String?
+  exampleRu      String?
+  exampleFr      String?
+
+  forms DictionaryForm[]
+  words Word[]
+
+  @@index([bare])
+  @@index([inB1Minimum, b1Rank])
+}
+
+/// Une forme fléchie d'un lemme. Sert aussi d'index inverse pour reconnaître un mot dans un texte.
+model DictionaryForm {
+  id           Int    @id
+  entryId      Int
+  formKey      String // ex. 'sg_gen', 'presfut_sg1', 'decl_f_acc', 'past_m'
+  accented     String
+  bareForm     String
+  variantIndex Int    @default(0)
+
+  entry DictionaryEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([bareForm])
+  @@index([entryId])
+}
+
+// ---- Auth.js ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+
+  accounts Account[]
+  sessions Session[]
+  words    Word[]
+  settings Settings?
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+// Mêmes tables Auth.js que l'ancienne app : la base de prod est une copie de l'ancienne.
+model Session {
+  sessionToken String   @id
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// ---- Apprentissage ---------------------------------------------------------------------
+
+/// L'état d'un mot pour un utilisateur — UN seul par lemme.
+/// LEARNING = en cours d'apprentissage ; KNOWN = acquis (réussi sur au moins 2 jours, ou déclaré
+/// connu au tri puis jamais raté). Un mot KNOWN raté repasse LEARNING.
+model Word {
+  userId        String
+  entryId       Int
+  status        String    @default("LEARNING") // 'LEARNING' | 'KNOWN'
+  /// 'triage' = déclaré connu au tri (vérifié plus tard par une révision espacée).
+  origin        String    @default("learn") // 'learn' | 'triage' | 'reader' | 'legacy'
+  ease          Float     @default(2.5)
+  intervalDays  Float     @default(0)
+  repetitions   Int       @default(0)
+  lapses        Int       @default(0)
+  dueAt         DateTime
+  lastReviewedAt DateTime?
+  firstSeenAt   DateTime  @default(now())
+  knownAt       DateTime?
+  source        String? // texte / origine
+  context       String? // phrase où le mot a été rencontré
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entry DictionaryEntry @relation(fields: [entryId], references: [id])
+
+  @@id([userId, entryId])
+  @@index([userId, dueAt])
+  @@index([userId, status])
+}
+
+/// Chaque révision (sert à la projection, aux courbes et au bilan de séance).
+model ReviewLog {
+  id      Int      @id @default(autoincrement())
+  userId  String
+  entryId Int
+  rating  String // 'again' | 'good' | 'easy' | 'known' (tri)
+  /// true = le mot était nouveau (première rencontre dans le parcours).
+  isNew   Boolean  @default(false)
+  day     String // "YYYY-MM-DD" Europe/Paris
+  at      DateTime @default(now())
+
+  @@index([userId, day])
+}
+
+/// Un texte de lecture : corpus partagé (userId null), généré au niveau, ou collé.
+model Text {
+  id          Int      @id @default(autoincrement())
+  userId      String?
+  source      String // 'corpus' | 'generated' | 'pasted'
+  title       String
+  body        String
+  level       Int? // difficulté estimée 1..5
+  attribution String?
+  status      String   @default("PENDING") // 'GENERATING' | 'PENDING' | 'ANALYZING' | 'READY' | 'FAILED'
+  analysis    String? // JSON ReaderAnalysis
+  analysisVersion String?
+  /// JSON ComprehensionQuestion[] — questions de compréhension du contenu (façon ТРКИ).
+  questions   String?
+  forDay      String? // texte du jour : "YYYY-MM-DD"
+  /// JSON number[] — mots nouveaux imposés au texte d'une leçon (ajoutés au parcours une fois lu).
+  newEntryIds String?
+  error       String?
+  createdAt   DateTime @default(now())
+
+  progress TextProgress[]
+
+  @@index([userId, createdAt])
+  @@index([userId, forDay])
+}
+
+model TextProgress {
+  userId      String
+  textId      Int
+  answers     String    @default("{}") // JSON { [questionId]: { choice, correct } }
+  right       Int       @default(0)
+  total       Int       @default(0)
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  text Text @relation(fields: [textId], references: [id], onDelete: Cascade)
+
+  @@id([userId, textId])
+}
+
+/// Une leçon (3 par jour : matin, après-midi, soir) : révisions → texte avec les mots connus →
+/// texte avec 10 mots nouveaux.
+model Lesson {
+  userId        String
+  day           String // "YYYY-MM-DD" Europe/Paris
+  slot          String // 'matin' | 'apres-midi' | 'soir'
+  /// JSON number[] — les 70 mots à réviser, figés à l'ouverture (reprise après rechargement).
+  reviewIds     String    @default("[]")
+  knownTextId   Int?
+  newTextId     Int?
+  reviewsDoneAt DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@id([userId, day, slot])
+}
+
+/// Une ligne par jour d'activité : série, calendrier, bilan.
+model DayLog {
+  userId       String
+  day          String // "YYYY-MM-DD" Europe/Paris
+  newWords     Int    @default(0)
+  reviews      Int    @default(0)
+  textsRead    Int    @default(0)
+  readingRight Int    @default(0)
+  readingTotal Int    @default(0)
+
+  @@id([userId, day])
+}
+
+model Settings {
+  userId   String  @id
+  examDate String? // "YYYY-MM-DD"
+  newPerDay Int    @default(23)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---- Notifications ---------------------------------------------------------------------
+
+/// Un appareil abonné aux rappels (Web Push).
+model PushSubscription {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// Rappels déjà envoyés : un seul par créneau et par jour.
+model PushLog {
+  userId String
+  day    String // "YYYY-MM-DD" Europe/Paris
+  slot   String // 'morning' | 'noon' | 'evening' | 'night'
+  sentAt DateTime @default(now())
+
+  @@id([userId, day, slot])
+}
