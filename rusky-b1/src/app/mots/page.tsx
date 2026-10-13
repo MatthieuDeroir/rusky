@@ -93,9 +93,13 @@ export default async function WordsPage({ searchParams }: { searchParams: Promis
 
   // Tri rapide par lexique : mots encore jamais rencontrés de chacun ; le lexique visé (le plus
   // bas incomplet) en avant.
+  // « À trier » : jamais rencontrés et pas encore passés au tri.
+  const skippedIds = (await prisma.triageSkip.findMany({ where: { userId }, select: { entryId: true } })).map((s) => s.entryId);
   const [{ focus }, ...untouched] = await Promise.all([
     lexiconCoverage(userId),
-    ...LEXICONS.map((l) => prisma.dictionaryEntry.count({ where: { AND: [listWhere(l.list), { words: { none: { userId } } }] } })),
+    ...LEXICONS.map((l) =>
+      prisma.dictionaryEntry.count({ where: { AND: [listWhere(l.list), { words: { none: { userId } } }, { id: { notIn: skippedIds } }] } }),
+    ),
   ]);
 
   const href = (params: Record<string, string | number | undefined>) => {

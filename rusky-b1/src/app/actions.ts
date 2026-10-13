@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
 import { parisDay } from "@/lib/dates";
-import { cardsFor, keepWord, learnFromText, lexiconCoverage, listWhere, recordAnswer, setWordStatus, spreadKnownAt, type Card } from "@/lib/learn";
+import { cardsFor, keepWord, learnFromText, lexiconCoverage, listWhere, recordAnswer, setWordStatus, spreadKnownAt, type Card, type LevelList } from "@/lib/learn";
 import { isSlot, type SlotId } from "@/lib/lessons";
 import { currentPlan } from "@/lib/memory";
 import { analysisCoverage, familiarEntryIds } from "@/lib/coverage";
@@ -30,10 +30,30 @@ export async function setWordStatusAction(entryId: number, known: boolean): Prom
   return status;
 }
 
-/** Tri rapide (Mots → trier un lexique) : ces mots sont déjà connus. Par lots, dans l'ordre. */
-export async function markKnownAction(entryIds: number[]) {
+/** Tri rapide : réponses par lots, dans l'ordre. « Je connais » → appris ; « je ne connais pas » →
+ * reste à venir (enseigné en leçon), mais n'est plus proposé au tri (sur tous les appareils). */
+export async function triageAction(items: { entryId: number; known: boolean }[]) {
   const userId = await currentUserId();
-  const ids = entryIds.slice(0, 100);
+  const batch = items.slice(0, 100);
+  for (const { entryId } of batch.filter((i) => !i.known))
+    await prisma.triageSkip.upsert({
+      where: { userId_entryId: { userId, entryId } },
+      update: {},
+      create: { userId, entryId },
+    });
+  await markKnown(userId, batch.filter((i) => i.known).map((i) => i.entryId));
+}
+
+/** « Revoir les mots passés » : ils reviennent dans le tri de ce lexique. */
+export async function resetSkipsAction(list: LevelList) {
+  const userId = await currentUserId();
+  const ids = (await prisma.dictionaryEntry.findMany({ where: listWhere(list), select: { id: true } })).map((e) => e.id);
+  await prisma.triageSkip.deleteMany({ where: { userId, entryId: { in: ids } } });
+}
+
+async function markKnown(userId: string, entryIds: number[]) {
+  if (entryIds.length === 0) return;
+  const ids = entryIds;
   for (const id of ids) await setWordStatus(userId, id, true);
   // Appris avant, souvent hors de l'app : daté sur les mois actifs, au prorata de chacun.
   await spreadKnownAt(userId, ids);

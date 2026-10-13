@@ -16,9 +16,11 @@ export default async function TriagePage({ searchParams }: { searchParams: Promi
   const { liste } = await searchParams;
   const lex = LEXICONS.find((l) => l.list === liste);
   if (!lex) notFound();
-  // Les mots du lexique jamais rencontrés, les plus fréquents d'abord.
-  const where = { AND: [listWhere(lex.list as LevelList), { words: { none: { userId } } }] };
-  const [entries, left] = await Promise.all([
+  // Les mots du lexique jamais rencontrés et pas encore passés au tri, les plus fréquents d'abord.
+  const skippedIds = (await prisma.triageSkip.findMany({ where: { userId }, select: { entryId: true } })).map((s) => s.entryId);
+  const inList = { AND: [listWhere(lex.list as LevelList), { words: { none: { userId } } }] };
+  const where = { AND: [inList, { id: { notIn: skippedIds } }] };
+  const [entries, left, skipped] = await Promise.all([
     prisma.dictionaryEntry.findMany({
       where,
       orderBy: [{ b1Rank: { sort: "asc", nulls: "last" } }, { id: "asc" }],
@@ -37,12 +39,14 @@ export default async function TriagePage({ searchParams }: { searchParams: Promi
       },
     }),
     prisma.dictionaryEntry.count({ where }),
+    prisma.dictionaryEntry.count({ where: { AND: [inList, { id: { in: skippedIds } }] } }),
   ]);
   return (
     <TriageDeck
       list={lex.list}
       label={lex.label}
       left={left}
+      skipped={skipped}
       cards={entries.map((e) => ({
         id: e.id,
         ru: accent(e.accented),

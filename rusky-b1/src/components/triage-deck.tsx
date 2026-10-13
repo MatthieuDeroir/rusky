@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Check, CloudOff, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { invalidateAction, markKnownAction } from "@/app/actions";
+import { invalidateAction, resetSkipsAction, triageAction } from "@/app/actions";
+import type { LevelList } from "@/lib/learn";
 import { Button, wordMeta } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { answerKey } from "@/lib/keys";
@@ -24,32 +25,14 @@ const RETRY_MS = [1500, 4000, 10000];
 /** Distance (px) à partir de laquelle un glissé compte comme une réponse. */
 const SWIPE = 90;
 
-/** Mots passés (« je ne connais pas ») : gardés sur cet appareil pour ne pas les reproposer à la
- * prochaine visite. Ils restent à apprendre : les leçons les enseigneront. */
-function skippedKey(list: string) {
-  return `rusky-tri-passes-${list}`;
-}
-function readSkipped(list: string): Set<number> {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(skippedKey(list)) ?? "[]") as number[]);
-  } catch {
-    return new Set();
-  }
-}
-function writeSkipped(list: string, ids: Set<number>) {
-  try {
-    localStorage.setItem(skippedKey(list), JSON.stringify([...ids]));
-  } catch {}
-}
-
 /** Tri rapide d'un lexique : le mot et son sens ; → ou glisser à droite = je connais, ← ou glisser
- * à gauche = je ne connais pas. Les mots connus sont enregistrés par lots, avec nouvelles
- * tentatives en cas d'échec réseau. */
-export function TriageDeck(props: { list: string; label: string; left: number; cards: TriageCard[] }) {
+ * à gauche = je ne connais pas. Les deux réponses sont enregistrées en base, par lots, avec
+ * nouvelles tentatives en cas d'échec réseau : un mot passé reste « à venir » (enseigné en leçon)
+ * et n'est plus proposé au tri, sur tous les appareils. */
+export function TriageDeck(props: { list: LevelList; label: string; left: number; skipped: number; cards: TriageCard[] }) {
   // Figé à l'ouverture : un nouveau rendu du serveur ne doit pas raccourcir le paquet en cours.
-  const [{ list, label, left, cards }] = useState(props);
+  const [{ list, label, left, skipped, cards }] = useState(props);
   const router = useRouter();
-  const [skipped, setSkipped] = useState<Set<number> | null>(null);
   const [i, setI] = useState(0);
   const [stats, setStats] = useState({ known: 0, unknown: 0 });
   const [drag, setDrag] = useState(0);
@@ -58,8 +41,8 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
   const [lastKey, setLastKey] = useState<string | null>(null);
   const start = useRef<number | null>(null);
 
-  // Enregistrement des mots connus : file envoyée par lots.
-  const queue = useRef<number[]>([]);
+  // Enregistrement des réponses : file envoyée par lots.
+  const queue = useRef<{ entryId: number; known: boolean }[]>([]);
   const running = useRef(false);
   const [save, setSave] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [pending, setPending] = useState(0);
@@ -72,7 +55,7 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
       let ok = false;
       for (let a = 0; a <= RETRY_MS.length && !ok; a++) {
         try {
-          await markKnownAction(batch);
+          await triageAction(batch);
           ok = true;
         } catch {
           if (a < RETRY_MS.length) await new Promise((r) => setTimeout(r, RETRY_MS[a]));
@@ -90,52 +73,57 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
     setSave("saved");
   }, []);
 
+  // Reprise des mots passés gardés sur l'appareil par l'ancienne version : envoyés une fois au
+  // serveur, puis effacés de l'appareil (ils ne reviendront plus dans le tri).
   useEffect(() => {
-    // Lu après le montage (le serveur n'a pas accès au stockage de l'appareil).
-    const frame = requestAnimationFrame(() => setSkipped(readSkipped(list)));
+    try {
+      const key = `rusky-tri-passes-${list}`;
+      const old = JSON.parse(localStorage.getItem(key) ?? "[]") as number[];
+      if (old.length) {
+        queue.current.push(...old.map((entryId) => ({ entryId, known: false })));
+        void flush().then(() => {
+          try {
+            localStorage.removeItem(key);
+          } catch {}
+          // Le paquet affiché contenait encore ces mots : on le recharge sans eux.
+          if (!queue.current.length) location.reload();
+        });
+      }
+    } catch {}
+  }, [list, flush]);
+
+  useEffect(() => {
     const onLeave = (e: BeforeUnloadEvent) => {
       if (queue.current.length) e.preventDefault();
     };
     window.addEventListener("beforeunload", onLeave);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("beforeunload", onLeave);
-    };
-  }, [list]);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, []);
 
-  // Paquet de la visite : sans les mots passés lors des visites précédentes (l'état `skipped` est
-  // lu une fois ; les mots passés pendant la visite ne sont écrits que sur l'appareil).
-  const deck = useMemo(() => (skipped ? cards.filter((c) => !skipped.has(c.id)) : []), [cards, skipped]);
+  // Paquet de la visite (le serveur en a déjà retiré les mots passés).
+  const deck = cards;
   const card = deck[i];
   // Position et mots passés tenus dans des références : deux appuis rapprochés (avant le rendu
   // suivant) traitent bien deux cartes différentes, jamais deux fois la même.
   const pos = useRef(0);
-  const passed = useRef<Set<number> | null>(null);
   const sent = useRef(new Set<number>());
 
   const answer = useCallback(
     (known: boolean) => {
-      if (!skipped) return;
       const c = deck[pos.current];
       if (!c) return;
       pos.current += 1;
-      if (known) {
-        if (!sent.current.has(c.id)) {
-          sent.current.add(c.id);
-          queue.current.push(c.id);
-          setPending(queue.current.length);
-          void flush();
-        }
-      } else {
-        passed.current ??= new Set(skipped);
-        passed.current.add(c.id);
-        writeSkipped(list, passed.current);
+      if (!sent.current.has(c.id)) {
+        sent.current.add(c.id);
+        queue.current.push({ entryId: c.id, known });
+        setPending(queue.current.length);
+        void flush();
       }
       setStats((s) => (known ? { ...s, known: s.known + 1 } : { ...s, unknown: s.unknown + 1 }));
       setDrag(0);
       setI(pos.current);
     },
-    [deck, skipped, list, flush],
+    [deck, flush],
   );
 
   useEffect(() => {
@@ -155,7 +143,7 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
     return () => document.removeEventListener("keydown", onKey, true);
   }, [answer]);
 
-  const remaining = Math.max(0, left - stats.known - (skipped?.size ?? 0));
+  const remaining = Math.max(0, left - stats.known - stats.unknown);
 
   return (
     <div className="space-y-6">
@@ -183,9 +171,7 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
         </p>
       </header>
 
-      {skipped === null ? (
-        <p className="animate-pulse text-muted">Chargement…</p>
-      ) : !card ? (
+      {!card ? (
         <div className="space-y-4 py-6">
           <p className="text-[20px] font-medium">
             {deck.length === 0 && stats.known + stats.unknown === 0 ? "Plus aucun mot à trier ici." : "Paquet terminé."}
@@ -196,15 +182,16 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
           </p>
           <div className="flex flex-wrap gap-3">
             <Button onClick={() => location.reload()}>Continuer</Button>
-            {(skipped.size > 0 || stats.unknown > 0) && (
+            {(skipped > 0 || stats.unknown > 0) && (
               <Button
                 variant="secondary"
-                onClick={() => {
-                  writeSkipped(list, new Set());
+                onClick={async () => {
+                  await flush();
+                  await resetSkipsAction(list).catch(() => {});
                   location.reload();
                 }}
               >
-                Revoir les mots passés
+                Revoir les mots passés ({skipped + stats.unknown})
               </Button>
             )}
           </div>

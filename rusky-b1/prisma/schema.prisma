@@ -267,3 +267,12 @@ model PushLog {
 
   @@id([userId, day, slot])
 }
+
+/// Mots passés au tri rapide (« je ne connais pas ») : restent « à venir », ne sont plus proposés au tri.
+model TriageSkip {
+  userId    String
+  entryId   Int
+  skippedAt DateTime @default(now())
+
+  @@id([userId, entryId])
+}
