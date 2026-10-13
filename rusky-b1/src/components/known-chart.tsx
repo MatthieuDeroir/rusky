@@ -86,11 +86,14 @@ export function KnownChart({
   target,
   today,
   examDate,
+  levels,
 }: {
   points: MonthPoint[];
   target: number;
   today: string;
   examDate: string | null;
+  /** Seuils de vocabulaire des niveaux estimés (A1+ 500, A2 1 000…). */
+  levels: { code: string; words: number }[];
 }) {
   const proj = project(points, target, today, examDate);
   const all = [...points.map((p) => ({ month: p.month, total: p.total })), ...proj.points];
@@ -130,6 +133,31 @@ export function KnownChart({
           <text x={PAD.left} y={y(target) - 10} fontSize="18" fill="var(--muted)">
             {nf(target)} mots
           </text>
+          {/* Niveaux (seuils de vocabulaire) */}
+          {levels.map((l) => {
+            // A1 : de 0 au premier seuil, libellé posé au-dessus de l'axe.
+            const ly = l.words > 0 ? y(l.words) : base;
+            return (
+              <g key={l.code}>
+                {l.words > 0 && (
+                  <line x1={PAD.left} x2={W - PAD.right} y1={ly} y2={ly} stroke="var(--cobalt)" strokeWidth="1.5" strokeDasharray="3 7" opacity="0.45" />
+                )}
+                <text
+                  x={W - PAD.right}
+                  y={ly - 7}
+                  textAnchor="end"
+                  fontSize="17"
+                  fontWeight="600"
+                  fill="var(--cobalt)"
+                  stroke="var(--paper)"
+                  strokeWidth="5"
+                  paintOrder="stroke"
+                >
+                  {l.code}
+                </text>
+              </g>
+            );
+          })}
           {/* Examen */}
           {examIdx >= 0 && (
             <g>
@@ -200,6 +228,9 @@ export function KnownChart({
             <i className="w-4 border-t-[3px] border-dotted border-known" /> projection
           </span>
         )}
+        <span className="flex items-center gap-1.5">
+          <i className="w-4 border-t-2 border-dashed border-cobalt/60" /> niveaux (vocabulaire)
+        </span>
       </figcaption>
       {proj.pace > 0 && (
         <p className="text-[17px]">

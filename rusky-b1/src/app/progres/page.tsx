@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { currentUserId } from "@/lib/auth";
 import { parisDay } from "@/lib/dates";
-import { activity, getProgress, getSettings, lexiconGrid, knownByMonth } from "@/lib/learn";
+import { activity, getProgress, getSettings, lexiconGrid, knownByMonth, LEVELS } from "@/lib/learn";
 import { KnownChart } from "@/components/known-chart";
 import { LexiconGrid } from "@/components/lexicon";
 import { SettingsForm } from "@/components/settings-form";
@@ -74,7 +74,7 @@ export default async function ProgressPage() {
 
       <section className="space-y-3">
         <h2 className="text-[22px] font-semibold">Mots du lexique B1 connus, mois par mois</h2>
-        <KnownChart points={months} target={p.b1Total} today={parisDay()} examDate={p.examDate} />
+        <KnownChart points={months} target={p.b1Total} today={parisDay()} examDate={p.examDate} levels={LEVELS} />
         <p className="text-[14px] text-faint">
           Cumul à la fin de chaque mois. Un mot appris en leçon devient connu après deux jours de révisions réussies.
         </p>

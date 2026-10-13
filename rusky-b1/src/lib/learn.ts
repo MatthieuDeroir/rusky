@@ -268,7 +268,7 @@ export interface Level {
 }
 
 /** Seuils indicatifs (vocabulaire du parcours B1 connu + score de lecture sur 30 jours). */
-const LEVELS: { code: string; words: number; reading: number }[] = [
+export const LEVELS: { code: string; words: number; reading: number }[] = [
   { code: "A1", words: 0, reading: 0 },
   { code: "A1+", words: 500, reading: 0 },
   { code: "A2", words: 1000, reading: 0.6 },
