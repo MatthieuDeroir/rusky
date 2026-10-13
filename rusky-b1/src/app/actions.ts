@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
 import { parisDay } from "@/lib/dates";
-import { cardsFor, keepWord, learnFromText, recordAnswer, setWordStatus, spreadKnownAt, type Card } from "@/lib/learn";
+import { cardsFor, keepWord, learnFromText, lexiconCoverage, listWhere, recordAnswer, setWordStatus, spreadKnownAt, type Card } from "@/lib/learn";
 import { isSlot, reserveNewWords, type SlotId } from "@/lib/lessons";
 import { analysisCoverage, familiarEntryIds } from "@/lib/coverage";
 import { createDailyText, ensureQuestions, fillGeneratedText, type ComprehensionQuestion, type TextAnswer } from "@/lib/texts";
@@ -156,11 +156,17 @@ export async function completeLessonAction(slot: SlotId) {
   revalidatePath("/", "layout");
 }
 
-/** Les mots nouveaux d'un texte de leçon, une fois le texte lu (pour le récapitulatif). */
+/** Les mots nouveaux d'un texte, une fois lu (pour le bilan) : les imposés et ceux du lexique en
+ * cours que la lecture a fait entrer dans le parcours. */
 export async function textNewWordsAction(textId: number): Promise<Card[]> {
   const userId = await currentUserId();
   const t = await readable(textId, userId);
-  return cardsFor(userId, t.newEntryIds ? (JSON.parse(t.newEntryIds) as number[]) : []);
+  const added = await prisma.word.findMany({
+    where: { userId, origin: "learn", source: t.title, firstSeenAt: { gte: new Date(Date.now() - 6 * 3_600_000) } },
+    select: { entryId: true },
+  });
+  const ids = [...new Set([...(t.newEntryIds ? (JSON.parse(t.newEntryIds) as number[]) : []), ...added.map((w) => w.entryId)])];
+  return cardsFor(userId, ids);
 }
 
 /** Crée un nouveau texte du jour et lance son écriture (utilisable pendant un rendu). */
@@ -243,10 +249,24 @@ export async function answerQuestionAction(textId: number, questionId: string, c
 export async function completeTextAction(textId: number) {
   const userId = await currentUserId();
   const t = await readable(textId, userId);
-  // Texte de leçon : ses mots nouveaux (ceux qui y figurent vraiment) entrent dans le parcours.
-  if (t.newEntryIds && t.analysis) {
-    const ids = JSON.parse(t.newEntryIds) as number[];
+  // Mots nouveaux rencontrés : les imposés du texte de leçon, et tous ceux du lexique en cours
+  // (niveau actuel) présents dans le texte, entrent dans le parcours « en cours ». Les mots de
+  // niveau supérieur croisés en route ne sont pas ajoutés.
+  if (t.analysis) {
     const analysis = JSON.parse(t.analysis) as ReaderAnalysis;
+    const inText = [...new Set(analysis.paragraphs.flatMap((p) => (p.sentences ?? []).flatMap((s) => s.words.map((w) => w.entryId))))].filter(
+      (x): x is number => x !== null,
+    );
+    const { focus } = await lexiconCoverage(userId);
+    const focusIds = focus
+      ? (
+          await prisma.dictionaryEntry.findMany({
+            where: { AND: [{ id: { in: inText } }, listWhere(focus)] },
+            select: { id: true },
+          })
+        ).map((e) => e.id)
+      : [];
+    const ids = [...new Set([...(t.newEntryIds ? (JSON.parse(t.newEntryIds) as number[]) : []), ...focusIds])];
     const sentences = new Map<number, string>();
     for (const p of analysis.paragraphs)
       for (const s of p.sentences ?? []) {

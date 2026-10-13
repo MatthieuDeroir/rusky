@@ -4,6 +4,7 @@ import { parisDay } from "@/lib/dates";
 import { generateReadingText } from "@/lib/mistral";
 import { runAnalysis } from "@/lib/reader/analyze";
 import { bodyCoverage, familiarEntryIds, ratio } from "@/lib/coverage";
+import { lexiconCoverage, LEXICONS, listWhere } from "@/lib/learn";
 
 /** Question de compréhension du CONTENU, façon ТРКИ : question et options en russe, avec leur
  * traduction pour s'aider au début. */
@@ -155,13 +156,13 @@ export async function fillGeneratedText(textId: number, userId: string, mode: Te
     // Vocabulaire strict (mots connus seulement) : entraînement, et texte de leçon (+ ses mots nouveaux).
     const strict = practice || !!imposed;
     const [knownB1, mine, upcoming, familiar] = await Promise.all([
-      prisma.word.count({ where: { userId, status: "KNOWN", entry: { b1Rank: { not: null } } } }),
-      // Texte du jour : le vocabulaire B1 de l'apprenant (connu + en cours) — c'est sur lui que
-      // l'examen porte. Entraînement : seulement les mots CONNUS (B1 d'abord, puis les autres).
+      prisma.word.count({ where: { userId, learnedAt: { not: null }, entry: { b1Rank: { not: null } } } }),
+      // Texte du jour : le vocabulaire B1 de l'apprenant (connu + en cours). Entraînement et leçon :
+      // TOUS les mots appris, dans la limite du lexique B2 (A1, B1, B2).
       prisma.word.findMany({
-        where: strict ? { userId, status: "KNOWN" } : { userId, entry: { b1Rank: { not: null } } },
+        where: strict ? { userId, learnedAt: { not: null }, entry: listWhere("b2") } : { userId, entry: { b1Rank: { not: null } } },
         orderBy: { entry: { b1Rank: { sort: "asc", nulls: "last" } } },
-        take: strict ? 1200 : 900,
+        take: strict ? 3000 : 900,
         select: { status: true, entry: { select: { bare: true } } },
       }),
       // Les prochains mots du parcours : ceux que le texte du jour introduit.
@@ -173,8 +174,24 @@ export async function fillGeneratedText(textId: number, userId: string, mode: Te
             take: imposed ? imposed.length : NEW_WORDS_PER_TEXT,
             select: { id: true, bare: true, glossFr: true, translationsFr: true },
           }),
-      familiarEntryIds(userId, strict ? { knownOnly: true } : { b1Only: true }),
+      familiarEntryIds(userId, strict ? { knownOnly: true, inLexicons: true } : { b1Only: true }),
     ]);
+    // Texte de leçon : mots nouveaux tolérés en plus des imposés — ceux du lexique en cours et du
+    // lexique suivant (niveau +1), s'ils aident à construire le texte. Au-delà : trop difficiles.
+    let stretch = new Set<number>();
+    let stretchWords: string[] = [];
+    if (imposed) {
+      const { focus } = await lexiconCoverage(userId);
+      const i = LEXICONS.findIndex((l) => l.list === focus);
+      const nextList = LEXICONS[Math.min(LEXICONS.length - 1, Math.max(0, i) + 1)].list;
+      const pool = await prisma.dictionaryEntry.findMany({
+        where: { AND: [listWhere(nextList), { words: { none: { userId, learnedAt: { not: null } } } }] },
+        orderBy: [{ b1Rank: { sort: "asc", nulls: "last" } }, { id: "asc" }],
+        select: { id: true, bare: true },
+      });
+      stretch = new Set(pool.map((p) => p.id));
+      stretchWords = pool.filter((p) => !imposed.includes(p.id)).slice(0, 150).map((p) => p.bare);
+    }
     const brief = levelBrief(knownB1);
     // Texte du jour : autorisés sans pénalité les mots familiers, les mots imposés et les mots les
     // plus fréquents du B1 (appris dans les jours qui viennent). Entraînement : les mots connus seuls.
@@ -205,6 +222,7 @@ export async function fillGeneratedText(textId: number, userId: string, mode: Te
               .map((u) => `${u.bare} (${gloss(u)})`)
               .join(", ")}.`,
             "S'il manque un mot pour une idée, change d'idée ou fais une phrase plus simple : le texte doit rester naturel et logique.",
+            `Si (et seulement si) c'est nécessaire pour une phrase naturelle, tu peux employer quelques mots de cette liste de niveau supérieur, en restant sous 10 % de mots inconnus au total : ${stretchWords.join(", ")}.`,
             `Mots que l'apprenant connaît : ${mine.map((w) => w.entry.bare).join(", ")}.`,
             "Les questions et les options n'emploient aussi que ces mots (et les mots nouveaux).",
           ]
@@ -239,7 +257,7 @@ export async function fillGeneratedText(textId: number, userId: string, mode: Te
     ).join("\n");
 
     // On garde le meilleur essai ; on s'arrête dès que la couverture visée est atteinte.
-    let best: { out: Generated; questions: ComprehensionQuestion[]; coverage: number; missing: number } | null = null;
+    let best: { out: Generated; questions: ComprehensionQuestion[]; coverage: number; missing: number; hard: number } | null = null;
     let prompt = user;
     for (let attempt = 0; attempt < attempts; attempt++) {
       const out = (await generateReadingText(SYSTEM, prompt)) as Generated;
@@ -247,15 +265,20 @@ export async function fillGeneratedText(textId: number, userId: string, mode: Te
       if (!out.text || !/[а-яё]/i.test(out.text) || questions.length < 3) continue;
       const cov = await bodyCoverage(out.text, allowed);
       const missing = imposed ? upcoming.filter((u) => !cov.seen.has(u.id)) : [];
+      // Texte de leçon : mots inconnus hors des mots tolérés (imposés, lexique en cours et suivant).
+      const tooHard = imposed
+        ? (await bodyCoverage(out.text, new Set([...allowed, ...stretch, ...imposed]))).unknown
+        : cov.unknown.filter((w) => !upcoming.some((u) => u.bare === w));
       console.log(
-        `[texts] ${textId} essai ${attempt + 1} : couverture ${Math.round(ratio(cov) * 100)} %${imposed ? `, ${missing.length} mot(s) imposé(s) absent(s)` : ""}`,
+        `[texts] ${textId} essai ${attempt + 1} : couverture ${Math.round(ratio(cov) * 100)} %${imposed ? `, ${missing.length} mot(s) imposé(s) absent(s), ${tooHard.length} hors niveau` : ""}`,
       );
       // Meilleur essai : d'abord celui qui atteint la couverture visée, puis le moins de mots
-      // imposés manquants, puis la meilleure couverture.
-      const score = (c: number, m: number) => (c >= target ? 0 : 1000) + m * 10 - c;
-      if (!best || score(ratio(cov), missing.length) < score(best.coverage, best.missing))
-        best = { out, questions, coverage: ratio(cov), missing: missing.length };
-      if (ratio(cov) >= target && missing.length <= MAX_MISSING) break;
+      // imposés manquants et hors niveau, puis la meilleure couverture.
+      const hard = imposed ? tooHard.length : 0;
+      const score = (c: number, m: number, h: number) => (c >= target ? 0 : 1000) + m * 10 + h * 5 - c;
+      if (!best || score(ratio(cov), missing.length, hard) < score(best.coverage, best.missing, best.hard))
+        best = { out, questions, coverage: ratio(cov), missing: missing.length, hard };
+      if (ratio(cov) >= target && missing.length <= MAX_MISSING && hard <= 1) break;
       // Essai suivant : réviser CE texte en remplaçant précisément les mots hors liste — bien plus
       // efficace que de tout réécrire en espérant mieux.
       prompt = [
@@ -263,7 +286,7 @@ export async function fillGeneratedText(textId: number, userId: string, mode: Te
         "",
         "Voici ta version précédente :",
         JSON.stringify({ title: out.title, text: out.text, questions: out.questions }),
-        `Ces mots sont trop difficiles pour l'apprenant : ${cov.unknown.filter((w) => !upcoming.some((u) => u.bare === w)).join(", ")}.`,
+        tooHard.length ? `Ces mots sont trop difficiles pour l'apprenant : ${tooHard.join(", ")}.` : "",
         imposed
           ? `Ton texte a ${cov.total} mots dont ${cov.known} connus (${Math.round(ratio(cov) * 100)} %) : il en faut au moins ${Math.ceil(cov.total * target)}. Retire ou remplace au moins ${Math.max(1, Math.ceil(cov.total * target) - cov.known)} mots inconnus (pas les mots nouveaux obligatoires) ; des phrases plus courtes et plus simples sont bienvenues.`
           : "",

@@ -11,18 +11,25 @@ const FUNCTION_WORD_RANK = 300;
 
 /** Lemmes familiers : mots connus ou en cours d'apprentissage + mots-outils fréquents.
  * `b1Only` : seulement les mots du lexique B1 (génération des textes : l'examen porte sur eux).
- * `knownOnly` : seulement les mots connus (textes d'entraînement).
+ * `knownOnly` : seulement les mots appris (au moins une fois) — textes d'entraînement et de leçon.
+ * `inLexicons` : seulement les mots des lexiques conseillés (A1, B1, B2).
  * `asOf` : le vocabulaire tel qu'il était à cette date (mots déjà rencontrés alors). */
 export async function familiarEntryIds(
   userId: string,
-  { b1Only = false, knownOnly = false, asOf }: { b1Only?: boolean; knownOnly?: boolean; asOf?: Date } = {},
+  {
+    b1Only = false,
+    knownOnly = false,
+    inLexicons = false,
+    asOf,
+  }: { b1Only?: boolean; knownOnly?: boolean; inLexicons?: boolean; asOf?: Date } = {},
 ): Promise<Set<number>> {
   const [words, tools] = await Promise.all([
     prisma.word.findMany({
       where: {
         userId,
         ...(b1Only ? { entry: { b1Rank: { not: null } } } : {}),
-        ...(knownOnly ? { status: "KNOWN" } : {}),
+        ...(inLexicons ? { entry: { OR: [{ inA1Minimum: true }, { b1Rank: { not: null } }, { inB2Minimum: true }] } } : {}),
+        ...(knownOnly ? { learnedAt: { not: null } } : {}),
         ...(asOf ? { firstSeenAt: { lte: asOf } } : {}),
       },
       select: { entryId: true, entry: { select: { type: true, bare: true, partner: true } } } }),

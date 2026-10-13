@@ -17,11 +17,17 @@ function addDays(day: string, n: number): string {
 /** Rythme moyen observé (tous les mots connus par jour), depuis le premier mot daté. */
 async function knownPace(userId: string) {
   // Mots appris (au moins une fois) : un oubli ne fait pas reculer le compte.
-  const words = await prisma.word.findMany({ where: { userId, learnedAt: { not: null } }, select: { learnedAt: true } });
+  const words = await prisma.word.findMany({
+    where: { userId, learnedAt: { not: null } },
+    select: { learnedAt: true, status: true },
+  });
   const dates = words.map((w) => w.learnedAt!.getTime());
+  // Pour les rythmes récents (semaine, mois) : seuls les mots appris ET retenus comptent — un mot
+  // appris puis oublié pendant la période ne fait pas avancer le rythme de cette période.
+  const retainedDates = words.filter((w) => w.status === "KNOWN").map((w) => w.learnedAt!.getTime());
   const first = dates.length ? Math.min(...dates) : Date.now();
   const days = Math.max(1, (Date.now() - first) / DAY_MS);
-  return { known: words.length, perDay: words.length / days, dates };
+  return { known: words.length, perDay: words.length / days, dates, retainedDates };
 }
 
 export interface StepGoal {
@@ -66,9 +72,10 @@ export interface WeekReport {
 
 /** Cette semaine face à la moyenne : le seul classement qui compte, contre soi-même. */
 export async function weekReport(userId: string): Promise<WeekReport> {
-  const { known, perDay, dates } = await knownPace(userId);
+  const { known, perDay, retainedDates } = await knownPace(userId);
   const since = Date.now() - 7 * DAY_MS;
-  const week = dates.filter((d) => d >= since).length;
+  // Semaine nette de l'oubli : mots appris ces 7 jours et toujours retenus.
+  const week = retainedDates.filter((d) => d >= since).length;
   const average = perDay * 7;
   const target = LEVELS.find((l) => !/[+−]$/.test(l.code) && l.need > known);
   return {
@@ -188,9 +195,10 @@ export interface PaceRow {
 /** Trois rythmes comparés — depuis le début, 30 derniers jours, 7 derniers jours — et la date du
  * prochain niveau (et du prochain palier) à chacun. */
 export async function paceComparison(userId: string) {
-  const { known, perDay, dates } = await knownPace(userId);
+  const { known, perDay, retainedDates } = await knownPace(userId);
   const now = Date.now();
-  const recent = (days: number) => dates.filter((d) => d >= now - days * DAY_MS).length / days;
+  // Rythmes récents nets de l'oubli (mots appris sur la période et toujours retenus).
+  const recent = (days: number) => retainedDates.filter((d) => d >= now - days * DAY_MS).length / days;
   const official = LEVELS.find((l) => !/[+−]$/.test(l.code) && l.need > known) ?? null;
   const step = LEVELS.find((l) => l.need > known) ?? null;
   const today = parisDay();
@@ -198,8 +206,8 @@ export async function paceComparison(userId: string) {
     need !== undefined && rate > 0 ? addDays(today, Math.ceil((need - known) / rate)) : null;
   const rows: PaceRow[] = [
     { label: "Depuis le début", perDay },
-    { label: "30 derniers jours", perDay: recent(30) },
-    { label: "7 derniers jours", perDay: recent(7) },
+    { label: "30 derniers jours (net de l’oubli)", perDay: recent(30) },
+    { label: "7 derniers jours (net de l’oubli)", perDay: recent(7) },
   ].map((r) => ({ ...r, officialDate: at(official?.need, r.perDay), stepDate: at(step?.need, r.perDay) }));
   return { rows, official, step, known };
 }
