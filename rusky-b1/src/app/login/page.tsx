@@ -9,7 +9,8 @@ export default async function LoginPage() {
   return (
     <div className="flex min-h-[70vh] flex-col justify-center gap-8">
       <div className="space-y-2">
-        <p className="ru text-[56px] leading-none font-semibold">Rusky</p>
+        {/* eslint-disable-next-line @next/next/no-img-element -- SVG statique, pas d'optimisation utile */}
+        <img src="/logo.svg" alt="Rusky" width={96} height={96} className="size-24" />
         <p className="text-[19px] text-muted">Le lexique B1 et la lecture, un peu chaque jour, jusqu’au ТРКИ-1.</p>
       </div>
       <form
