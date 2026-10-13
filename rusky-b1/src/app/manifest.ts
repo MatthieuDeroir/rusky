@@ -12,9 +12,9 @@ export default function manifest(): MetadataRoute.Manifest {
     lang: "fr",
     // Nouveaux noms de fichiers : une PWA installée ne remplace son icône que si l'adresse change.
     icons: [
-      { src: "/icons/rusky-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: "/icons/rusky-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: "/icons/rusky-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: "/icons/rusky-ring-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icons/rusky-ring-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icons/rusky-ring-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }
