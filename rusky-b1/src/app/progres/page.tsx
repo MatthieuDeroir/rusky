@@ -3,7 +3,7 @@ import { currentUserId } from "@/lib/auth";
 import { parisDay } from "@/lib/dates";
 import { activity, getProgress, getSettings, lexiconCoverage, lexiconGrid, knownByMonth, levelLadder } from "@/lib/learn";
 import { LevelLadder } from "@/components/level-ladder";
-import { a1Themes, weekReport } from "@/lib/motivation";
+import { a1Themes, paceComparison, weekReport } from "@/lib/motivation";
 import { KnownChart } from "@/components/known-chart";
 import { LevelRequirements } from "@/components/level-requirements";
 import { LexiconGrid } from "@/components/lexicon";
@@ -32,10 +32,11 @@ export default async function ProgressPage() {
   const focus = coverage.lexicons.find((l) => l.list === coverage.focus) ?? null;
   // Le tableau du haut suit le lexique du niveau en cours (A1, puis A2…), le dernier s'ils sont tous complets.
   const shown = focus ?? coverage.lexicons[coverage.lexicons.length - 1];
-  const [grid, themes, week] = await Promise.all([
+  const [grid, themes, week, paces] = await Promise.all([
     lexiconGrid(userId, shown.list),
     shown.list === "a1" ? a1Themes(userId) : Promise.resolve([]),
     weekReport(userId),
+    paceComparison(userId),
   ]);
   // Thèmes les plus incomplets d'abord : là où sont les trous.
   const themesByGap = [...themes].sort((a, b) => a.known / a.size - b.known / b.size || b.size - a.size);
@@ -130,6 +131,43 @@ export default async function ProgressPage() {
           </p>
         )}
       </section>
+
+      {paces.official && (
+        <section className="space-y-3">
+          <h2 className="text-[22px] font-semibold">Rythmes comparés</h2>
+          <p className="text-[15px] text-muted">
+            Date d’achèvement selon le rythme retenu : prochain niveau {paces.official.code} ({paces.official.need} mots)
+            {paces.step && paces.step.code !== paces.official.code ? ` et prochain palier ${paces.step.code} (${paces.step.need})` : ""}. Tu en as{" "}
+            {paces.known}.
+          </p>
+          <div className="overflow-hidden rounded-2xl shadow-[inset_0_0_0_1px_var(--line)]">
+            <table className="w-full text-left text-[15px]">
+              <thead className="bg-surface text-[13px] text-muted">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Rythme</th>
+                  <th className="px-3 py-2 text-right font-medium">Mots / jour</th>
+                  {paces.step && paces.step.code !== paces.official.code && (
+                    <th className="px-3 py-2 text-right font-medium">{paces.step.code}</th>
+                  )}
+                  <th className="px-3 py-2 text-right font-medium">{paces.official.code}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paces.rows.map((r) => (
+                  <tr key={r.label} className="border-t border-line">
+                    <td className="px-3 py-2">{r.label}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{r.perDay.toLocaleString("fr-FR", { maximumFractionDigits: 1 })}</td>
+                    {paces.step && paces.step.code !== paces.official!.code && (
+                      <td className="px-3 py-2 text-right">{r.stepDate ? fmtDate(r.stepDate) : "—"}</td>
+                    )}
+                    <td className="px-3 py-2 text-right font-medium">{r.officialDate ? fmtDate(r.officialDate) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section className="space-y-3">
         <h2 className="text-[22px] font-semibold">Mots connus, mois par mois</h2>

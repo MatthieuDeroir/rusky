@@ -171,3 +171,31 @@ export async function rereadSuggestions(userId: string, limit = 3) {
     }),
   );
 }
+
+export interface PaceRow {
+  label: string;
+  /** Mots devenus connus par jour sur la période. */
+  perDay: number;
+  /** Date d'achèvement du prochain niveau officiel et du prochain palier à ce rythme. */
+  officialDate: string | null;
+  stepDate: string | null;
+}
+
+/** Trois rythmes comparés — depuis le début, 30 derniers jours, 7 derniers jours — et la date du
+ * prochain niveau (et du prochain palier) à chacun. */
+export async function paceComparison(userId: string) {
+  const { known, perDay, dates } = await knownPace(userId);
+  const now = Date.now();
+  const recent = (days: number) => dates.filter((d) => d >= now - days * DAY_MS).length / days;
+  const official = LEVELS.find((l) => !/[+−]$/.test(l.code) && l.need > known) ?? null;
+  const step = LEVELS.find((l) => l.need > known) ?? null;
+  const today = parisDay();
+  const at = (need: number | undefined, rate: number) =>
+    need !== undefined && rate > 0 ? addDays(today, Math.ceil((need - known) / rate)) : null;
+  const rows: PaceRow[] = [
+    { label: "Depuis le début", perDay },
+    { label: "30 derniers jours", perDay: recent(30) },
+    { label: "7 derniers jours", perDay: recent(7) },
+  ].map((r) => ({ ...r, officialDate: at(official?.need, r.perDay), stepDate: at(step?.need, r.perDay) }));
+  return { rows, official, step, known };
+}
