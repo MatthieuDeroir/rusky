@@ -53,6 +53,8 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
   const [stats, setStats] = useState({ known: 0, unknown: 0 });
   const [drag, setDrag] = useState(0);
   const [dragging, setDragging] = useState(false);
+  // Diagnostic temporaire : ce que le navigateur reçoit pour la dernière touche.
+  const [lastKey, setLastKey] = useState<string | null>(null);
   const start = useRef<number | null>(null);
 
   // Enregistrement des mots connus : file envoyée par lots.
@@ -140,6 +142,7 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
     // (« ArrowLeft », « Left », parfois sans nom selon le système) : on lit le nom de la touche,
     // sa position (code) et son ancien code numérique (37/39 flèches, 100/102 pavé).
     const onKey = (e: KeyboardEvent) => {
+      setLastKey(`key « ${e.key} », code « ${e.code} », keyCode ${e.keyCode}, location ${e.location}`);
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.keyCode;
       const right =
@@ -259,6 +262,9 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
               )}
             </div>
           </div>
+          <p className="text-[13px] text-faint" aria-live="polite">
+            {lastKey ? `Dernière touche reçue : ${lastKey}` : "Appuie sur une touche : elle s’affichera ici (diagnostic)."}
+          </p>
           <div className="grid grid-cols-2 gap-3">
             <Button size="lg" variant="secondary" onClick={() => answer(false)}>
               <ArrowLeft className="size-5" /> Je ne connais pas
