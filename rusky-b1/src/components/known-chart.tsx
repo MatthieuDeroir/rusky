@@ -29,11 +29,14 @@ export function KnownChart({
   points,
   lexicons,
   next,
+  steps,
 }: {
   points: MonthPoint[];
   lexicons: { list: LevelList; code: string; size: number }[];
   /** Prochain niveau officiel (tous les mots). */
   next: { code: string; need: number } | null;
+  /** Paliers à tracer (officiels et intermédiaires) jusqu'au prochain niveau officiel. */
+  steps: { code: string; need: number }[];
 }) {
   const n = points.length;
   const W = PAD.left + PAD.right + STEP * Math.max(1, n - 1);
@@ -84,15 +87,34 @@ export function KnownChart({
             return <rect key={p.month} x={bx} y={base - h} width={barW} height={h} rx="5" fill="var(--known)" opacity="0.16" />;
           })}
           <line x1={PAD.left - 10} x2={x(n - 1) + 10} y1={base} y2={base} stroke="var(--line)" strokeWidth="2" />
-          {/* Prochain niveau */}
-          {next && (
-            <g>
-              <line x1={PAD.left} x2={x(n - 1)} y1={y(next.need)} y2={y(next.need)} stroke="var(--cobalt)" strokeWidth="2" strokeDasharray="4 7" opacity="0.6" />
-              <text x={PAD.left} y={y(next.need) - 8} fontSize="16" fontWeight="600" fill="var(--cobalt)">
-                {next.code} : {next.need} mots
-              </text>
-            </g>
-          )}
+          {/* Paliers jusqu'au prochain niveau : officiels marqués, intermédiaires (− / +) discrets */}
+          {steps.map((st) => {
+            const minor = /[+−]$/.test(st.code);
+            return (
+              <g key={st.code}>
+                <line
+                  x1={PAD.left}
+                  x2={x(n - 1)}
+                  y1={y(st.need)}
+                  y2={y(st.need)}
+                  stroke="var(--cobalt)"
+                  strokeWidth={minor ? 1.5 : 2}
+                  strokeDasharray={minor ? "2 6" : "4 7"}
+                  opacity={minor ? 0.35 : 0.65}
+                />
+                <text
+                  x={PAD.left}
+                  y={y(st.need) - 6}
+                  fontSize={minor ? 14 : 16}
+                  fontWeight="600"
+                  fill="var(--cobalt)"
+                  opacity={minor ? 0.65 : 1}
+                >
+                  {st.code} · {st.need}
+                </text>
+              </g>
+            );
+          })}
           {/* Lexiques conseillés */}
           {lexicons.map((l) => (
             <path key={l.list} d={line((p) => p.lex[l.list])} fill="none" stroke={LEX_COLOR[l.list]} strokeWidth="2.5" strokeLinejoin="round" />

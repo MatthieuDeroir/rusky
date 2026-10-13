@@ -85,6 +85,7 @@ export default async function ProgressPage() {
           points={months}
           lexicons={coverage.lexicons}
           next={nextRung && { code: nextRung.code, need: nextRung.need }}
+          steps={ladder.filter((r) => nextRung && r.need <= nextRung.need).map((r) => ({ code: r.code, need: r.need }))}
         />
         {focus && (
           <p className="text-[17px]">
