@@ -11,14 +11,15 @@ const LIST_LABEL: Record<LevelRung["list"], (l: LevelRung) => string> = {
   all: () => "tous les mots connus",
 };
 
-/** L'échelle des paliers : pour chacun, la part de sa liste connue (le trait marque le seuil de
- * 80 %), où j'en suis et le mois estimé à mon rythme. Les niveaux « + » sont plus discrets. */
+/** L'échelle des paliers : pour chacun, la part de sa liste connue (le trait marque son seuil
+ * quand il n'est pas la liste entière), où j'en suis et le mois estimé à mon rythme. Les paliers
+ * non officiels (« − », « + ») sont plus discrets. */
 export function LevelLadder({ rungs }: { rungs: LevelRung[] }) {
   return (
     <div className="space-y-3">
       <ol className="space-y-2.5">
         {rungs.map((r) => {
-          const plus = r.code.endsWith("+");
+          const plus = /[+−]$/.test(r.code);
           const pct = Math.min(1, r.known / r.size);
           const mark = r.need / r.size;
           const done = r.eta === "atteint";
@@ -34,7 +35,7 @@ export function LevelLadder({ rungs }: { rungs: LevelRung[] }) {
                 </span>
                 <span className="flex flex-wrap justify-between gap-x-3 text-[14px] text-muted">
                   <span className="tabular-nums">
-                    {nf(r.known)} / {nf(r.list === "all" ? r.need : r.need)} {r.list === "all" ? "mots" : `(${LIST_LABEL[r.list](r)})`}
+                    {nf(Math.min(r.known, r.need))} / {nf(r.need)} {r.list === "all" ? "mots" : `(${LIST_LABEL[r.list](r)})`}
                   </span>
                   <span>{done ? "atteint" : r.eta ? fmtMonth.format(new Date(r.eta + "-15T12:00:00Z")) : "—"}</span>
                 </span>
@@ -46,9 +47,9 @@ export function LevelLadder({ rungs }: { rungs: LevelRung[] }) {
       <p className="text-[14px] text-faint">
         Chaque palier se mesure sur sa liste de mots, tirée d’une même série : les lexiques minimums officiels du test
         (éd. Zlatoust), chacun incluant le précédent. A1 et A2 n’ont pas de liste publique : ce sont les mots les plus
-        fréquents du lexique B1. C1 et C2 n’en ont pas non plus : tous tes mots connus comptent. Un palier est atteint
-        à 80 % de sa liste (le trait) ; le mois est estimé à ton rythme moyen sur cette liste. Les niveaux « + » sont
-        des étapes intermédiaires.
+        fréquents du lexique B1. C1 et C2 n’en ont pas non plus : tous tes mots connus comptent. Un niveau officiel
+        est atteint quand toute sa liste est connue. Étapes non officielles : « − » à 80 % de la liste, « + » à
+        mi-chemin du « − » suivant. Le mois est estimé à ton rythme moyen sur chaque liste.
       </p>
     </div>
   );

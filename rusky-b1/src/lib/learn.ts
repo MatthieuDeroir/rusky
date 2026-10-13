@@ -261,7 +261,7 @@ export async function keepWord(userId: string, entryId: number, context: string,
 // ---- Progrès ---------------------------------------------------------------------------
 
 export interface Level {
-  code: string; // 'pré-A1' | 'A1' | 'A1+' | 'A2' | … | 'C2'
+  code: string; // 'pré-A1' | 'A1−' | 'A1' | 'A1+' | 'A2−' | … | 'C2'
   next: string | null;
   /** Ce qui manque pour le niveau suivant, en clair. */
   missing: string[];
@@ -285,39 +285,34 @@ export interface LevelDef {
   reading: number;
 }
 
-/** Part d'une liste à connaître pour atteindre un palier. */
+/** Part d'une liste qui donne le palier « − » (non officiel) ; le palier officiel demande toute la liste. */
 export const LEVEL_SHARE = 0.8;
 
-/** Paliers. Tailles officielles des lexiques minimums (éd. Zlatoust) : ТЭУ/A1 780 unités,
- * ТБУ/A2 ~1 300, ТРКИ-1/B1 2 300 (ici 2 276), ТРКИ-2/B2 ~5 100 (ici 5 348 avec le B1),
- * ТРКИ-3/C1 « свыше 11 000 » ; pas de lexique pour ТРКИ-4/C2 (20 000, règle « un niveau ≈ double
- * le vocabulaire » des mêmes auteurs). Palier atteint à 80 % de sa liste ; les niveaux « + » sont
- * à mi-chemin, pour voir avancer. À l'examen, 66 % à chaque épreuve, d'où le seuil de lecture. */
+/** Paliers. Officiels (un par niveau, atteint quand toute sa liste est connue), tailles des
+ * lexiques minimums (éd. Zlatoust) : ТЭУ/A1 780 unités, ТБУ/A2 ~1 300, ТРКИ-1/B1 2 300 (ici
+ * 2 276), ТРКИ-2/B2 ~5 100 (ici 5 348 avec le B1), ТРКИ-3/C1 ~11 000 ; pas de lexique pour
+ * ТРКИ-4/C2 (20 000, règle « un niveau ≈ double le vocabulaire » des mêmes auteurs).
+ * Non officiels, pour voir avancer : « − » à 80 % de la liste du niveau, « + » à mi-chemin entre
+ * le niveau et le « − » suivant (mesuré sur la liste suivante). Ils ne se chevauchent jamais.
+ * À l'examen, 66 % à chaque épreuve, d'où le seuil de lecture à partir de A2. */
 export function levelDefs(b1Size: number, b2Size: number): LevelDef[] {
-  const top = (code: string, size: number, reading = 0): LevelDef => ({
-    code,
-    list: "top",
-    size,
-    need: Math.ceil(size * LEVEL_SHARE),
-    reading,
-  });
-  const b1Need = Math.ceil(b1Size * LEVEL_SHARE);
-  const b2Need = Math.ceil(b2Size * LEVEL_SHARE);
-  return [
-    { code: "pré-A1", list: "top", size: 0, need: 0, reading: 0 },
-    top("A1", 780),
-    top("A1+", 1040),
-    top("A2", 1300, 0.66),
-    top("A2+", 1788, 0.66),
-    { code: "B1", list: "b1", size: b1Size, need: b1Need, reading: 0.66 },
-    // B1+ : à mi-chemin entre B1 et B2, mesuré sur la liste B2.
-    { code: "B1+", list: "b2", size: b2Size, need: Math.round((b1Need + b2Need) / 2), reading: 0.66 },
-    { code: "B2", list: "b2", size: b2Size, need: b2Need, reading: 0.66 },
-    { code: "B2+", list: "all", size: 8000, need: 8000, reading: 0.66 },
-    { code: "C1", list: "all", size: 11000, need: 11000, reading: 0.66 },
-    { code: "C1+", list: "all", size: 15500, need: 15500, reading: 0.66 },
-    { code: "C2", list: "all", size: 20000, need: 20000, reading: 0.66 },
+  const official: Omit<LevelDef, "need">[] = [
+    { code: "A1", list: "top", size: 780, reading: 0 },
+    { code: "A2", list: "top", size: 1300, reading: 0.66 },
+    { code: "B1", list: "b1", size: b1Size, reading: 0.66 },
+    { code: "B2", list: "b2", size: b2Size, reading: 0.66 },
+    { code: "C1", list: "all", size: 11000, reading: 0.66 },
+    { code: "C2", list: "all", size: 20000, reading: 0.66 },
   ];
+  const out: LevelDef[] = [{ code: "pré-A1", list: "top", size: 0, need: 0, reading: 0 }];
+  official.forEach((l, i) => {
+    out.push({ ...l, code: `${l.code}−`, need: Math.ceil(l.size * LEVEL_SHARE), reading: i ? official[i - 1].reading : 0 });
+    out.push({ ...l, need: l.size });
+    const next = official[i + 1];
+    // Chaque liste contient la précédente : connaître tout ce niveau = `l.size` mots de la suivante.
+    if (next) out.push({ ...next, code: `${l.code}+`, need: Math.round((l.size + Math.ceil(next.size * LEVEL_SHARE)) / 2), reading: l.reading });
+  });
+  return out;
 }
 
 /** Mots connus d'une liste. */

@@ -25,9 +25,9 @@ export default async function ProgressPage() {
     getSettings(userId),
     levelLadder(userId),
   ]);
-  // Le graphique ne suit que le prochain palier officiel (pas les « + ») : l'échelle reste à sa
-  // hauteur et les barres lisibles.
-  const nextRung = ladder.find((r) => !r.code.endsWith("+") && r.eta !== "atteint") ?? null;
+  // Le graphique ne suit que le prochain palier officiel (pas les « − » ni les « + ») : l'échelle
+  // reste à sa hauteur et les barres lisibles.
+  const nextRung = ladder.find((r) => !/[+−]$/.test(r.code) && r.eta !== "atteint") ?? null;
   const months = await knownByMonth(userId, nextRung);
   const listLabel = (r: NonNullable<typeof nextRung>) =>
     r.list === "top"
@@ -113,7 +113,7 @@ export default async function ProgressPage() {
         )}
         <LevelLadder rungs={ladder} />
         <h3 className="pt-2 text-[19px] font-semibold">Ce qu’il faut maîtriser</h3>
-        <LevelRequirements next={p.level.next} />
+        <LevelRequirements next={nextRung?.code ?? null} />
       </section>
 
       <section className="space-y-3">
