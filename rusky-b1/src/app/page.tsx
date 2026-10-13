@@ -34,7 +34,7 @@ export default async function TodayPage() {
   const detail = (l: (typeof lessons)[number]) => {
     if (l.done) return "faite";
     if (!l.started)
-      return `${plan.reviewLearned + plan.reviewLearning} révisions, puis un texte (90 % de mots connus, ${plan.newPerLesson} nouveaux)`;
+      return `${plan.reviewLearned + plan.reviewLearning} révisions, puis un texte (95 % de mots connus, ${plan.newPerLesson} nouveaux soulignés)`;
     const left = [!l.reviewsDone && "révisions", !l.newRead && "texte"].filter(Boolean);
     return `en cours, reste : ${left.join(", ")}`;
   };

@@ -78,7 +78,9 @@ export default async function ReadPage() {
               id: t.id,
               title: t.title,
               meta:
-                t.source === "generated"
+                t.source === "lesson"
+                  ? `Leçon, ${t.forDay ? fmt.format(new Date(t.forDay)) : ""}`
+                  : t.source === "generated"
                   ? `Texte du jour, ${t.forDay ? fmt.format(new Date(t.forDay)) : ""}`
                   : t.source === "practice"
                     ? "Entraînement, mots connus"

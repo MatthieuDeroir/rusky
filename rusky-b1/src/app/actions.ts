@@ -6,7 +6,8 @@ import { prisma } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
 import { parisDay } from "@/lib/dates";
 import { cardsFor, keepWord, learnFromText, lexiconCoverage, listWhere, recordAnswer, setWordStatus, spreadKnownAt, type Card } from "@/lib/learn";
-import { isSlot, reserveNewWords, type SlotId } from "@/lib/lessons";
+import { isSlot, type SlotId } from "@/lib/lessons";
+import { currentPlan } from "@/lib/memory";
 import { analysisCoverage, familiarEntryIds } from "@/lib/coverage";
 import { createDailyText, ensureQuestions, fillGeneratedText, type ComprehensionQuestion, type TextAnswer } from "@/lib/texts";
 import { runAnalysis } from "@/lib/reader/analyze";
@@ -99,8 +100,9 @@ export async function textStateAction(id: number): Promise<TextState> {
   };
 }
 
-/** Le texte d'une leçon : 90 % de mots connus, les autres sont les mots nouveaux du lexique en
- * cours. Créé à la première demande et écrit en tâche de fond pendant les révisions ; un
+/** Le texte d'une leçon : 95 % de mots connus, les 5 % restants sont des mots nouveaux du lexique
+ * en cours (soulignés à la lecture) ; sa longueur dépend du nombre de mots nouveaux prévu par la
+ * mémoire. Créé à la première demande et écrit en tâche de fond pendant les révisions ; un
  * rechargement de la page renvoie le même. Un texte en échec est remplacé. */
 export async function lessonTextsAction(slot: SlotId): Promise<{ newId: number }> {
   const userId = await currentUserId();
@@ -113,20 +115,8 @@ export async function lessonTextsAction(slot: SlotId): Promise<{ newId: number }
   const ensure = async (field: "knownTextId" | "newTextId"): Promise<number> => {
     const current = lesson[field];
     if (await usable(current)) return current!;
-    const practice = field === "knownTextId";
     const t = await prisma.text.create({
-      data: practice
-        ? { userId, source: "practice", title: "Тренировка", body: "", status: "GENERATING", error: "en cours", forDay: parisDay() }
-        : {
-            userId,
-            source: "generated",
-            title: "Новые слова",
-            body: "",
-            status: "GENERATING",
-            error: "en cours",
-            forDay: parisDay(),
-            newEntryIds: JSON.stringify(await reserveNewWords(userId)),
-          },
+      data: { userId, source: "lesson", title: "Урок", body: "", status: "GENERATING", error: "en cours", forDay: parisDay() },
     });
     // Seul le premier appel gagne (rechargement simultané) ; le perdant reprend le texte du gagnant.
     const won = await prisma.lesson.updateMany({ where: { ...key.userId_day_slot, [field]: current }, data: { [field]: t.id } });
@@ -134,7 +124,8 @@ export async function lessonTextsAction(slot: SlotId): Promise<{ newId: number }
       await prisma.text.delete({ where: { id: t.id } });
       return (await prisma.lesson.findUnique({ where: key }))![field]!;
     }
-    after(() => fillGeneratedText(t.id, userId, practice ? "known" : "level"));
+    const { newPerLesson } = await currentPlan(userId);
+    after(() => fillGeneratedText(t.id, userId, "lesson", newPerLesson));
     return t.id;
   };
   const newId = await ensure("newTextId");
@@ -199,9 +190,12 @@ export async function newDailyTextAction(): Promise<{ id: number }> {
 export async function retryTextAction(id: number) {
   const userId = await currentUserId();
   const t = await readable(id, userId);
-  if ((t.source === "generated" || t.source === "practice") && !t.body) {
+  if ((t.source === "generated" || t.source === "practice" || t.source === "lesson") && !t.body) {
     await prisma.text.update({ where: { id }, data: { status: "GENERATING", error: "en cours" } });
-    after(() => fillGeneratedText(id, userId, t.source === "practice" ? "known" : "level"));
+    const { newPerLesson } = await currentPlan(userId);
+    after(() =>
+      fillGeneratedText(id, userId, t.source === "practice" ? "known" : t.source === "lesson" ? "lesson" : "level", newPerLesson),
+    );
   } else {
     await prisma.text.update({ where: { id }, data: { status: "ANALYZING", error: null } });
     after(() => runAnalysis(id, { onlyFailed: true }));

@@ -35,7 +35,7 @@ interface Snapshot {
   streak: number;
 }
 
-/** Une leçon : révisions → un texte (90 % de mots connus, les autres sont les mots nouveaux du
+/** Une leçon : révisions → un texte (95 % de mots connus, les autres sont les mots nouveaux du
  * lexique en cours) → bilan avec les mots nouveaux.
  * Chaque réponse est enregistrée tout de suite : on peut quitter à tout moment sans rien perdre. */
 export function Session(props: SessionProps) {

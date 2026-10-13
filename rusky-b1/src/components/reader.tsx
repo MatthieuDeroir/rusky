@@ -85,7 +85,8 @@ export function Reader({
 }) {
   const [state, setState] = useState(initial);
   const [structure, setStructure] = useState(false);
-  const [showNew, setShowNew] = useState(false);
+  // Mots nouveaux soulignés par défaut : on sait tout de suite quels mots on apprend.
+  const [showNew, setShowNew] = useState(true);
   const [sel, setSel] = useState<Selection | null>(null);
   const [kept, setKept] = useState(() => new Set(collected));
   const [pending, start] = useTransition();

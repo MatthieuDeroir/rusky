@@ -4,7 +4,7 @@ import { parisDay } from "@/lib/dates";
 import { cardsFor, inList, LEXICONS, lexiconCoverage, listWhere, type Card } from "@/lib/learn";
 import { BASE_NEW_PER_LESSON, currentPlan, REVIEWS_PER_LESSON } from "@/lib/memory";
 
-/** Trois leçons par jour. Chacune : révisions → un texte à 90 % de mots connus, dont les autres
+/** Trois leçons par jour. Chacune : révisions → un texte à 95 % de mots connus, dont les autres
  * sont les mots nouveaux du lexique en cours. */
 export const SLOTS = [
   { id: "matin", label: "Matin", of: "du matin", from: 0 },
