@@ -71,14 +71,17 @@ export interface TextState {
   error: string | null;
   /** Mots familiers (connus, en cours, mots-outils) / mots du texte, et les mots nouveaux. */
   coverage: { known: number; total: number; newEntryIds: number[] } | null;
+  /** La même couverture avec le vocabulaire d'il y a un mois (preuve de progrès). */
+  coverageMonthAgo: { known: number; total: number } | null;
 }
 
 export async function textStateAction(id: number): Promise<TextState> {
   const userId = await currentUserId();
   const t = await readable(id, userId);
-  const [p, familiar] = await Promise.all([
+  const [p, familiar, familiarThen] = await Promise.all([
     prisma.textProgress.findUnique({ where: { userId_textId: { userId, textId: id } } }),
     t.analysis ? familiarEntryIds(userId) : null,
+    t.analysis ? familiarEntryIds(userId, { asOf: new Date(Date.now() - 30 * 86_400_000) }) : null,
   ]);
   const analysis = t.analysis ? (JSON.parse(t.analysis) as ReaderAnalysis) : null;
   return {
@@ -92,6 +95,7 @@ export async function textStateAction(id: number): Promise<TextState> {
     completed: !!p?.completedAt,
     error: t.error,
     coverage: analysis && familiar ? analysisCoverage(analysis, familiar) : null,
+    coverageMonthAgo: analysis && familiarThen ? analysisCoverage(analysis, familiarThen) : null,
   };
 }
 

@@ -215,6 +215,16 @@ export function Reader({
             Tu connais <span className="font-semibold">{Math.round((state.coverage.known / state.coverage.total) * 100)} %</span> des
             mots de ce texte
             {freshCount > 0 ? `, ${freshCount} ${freshCount > 1 ? "sont nouveaux" : "est nouveau"} pour toi.` : "."}
+            {(() => {
+              // Preuve de progrès : le même texte avec le vocabulaire d'il y a un mois.
+              const then = state.coverageMonthAgo;
+              if (!then || then.total === 0) return null;
+              const now = Math.round((state.coverage.known / state.coverage.total) * 100);
+              const before = Math.round((then.known / then.total) * 100);
+              return now - before >= 3 ? (
+                <span className="text-known"> Il y a un mois, tu en aurais connu {before} %.</span>
+              ) : null;
+            })()}
           </p>
         )}
         <p className="text-[15px] text-muted">Lis d’abord sans aide. Touche un mot pour voir son sens et sa forme.</p>

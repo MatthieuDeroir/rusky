@@ -3,6 +3,7 @@ import { currentUserId } from "@/lib/auth";
 import { parisDay } from "@/lib/dates";
 import { activity, getProgress, getSettings, lexiconCoverage, lexiconGrid, knownByMonth, levelLadder } from "@/lib/learn";
 import { LevelLadder } from "@/components/level-ladder";
+import { a1Themes, weekReport } from "@/lib/motivation";
 import { KnownChart } from "@/components/known-chart";
 import { LevelRequirements } from "@/components/level-requirements";
 import { LexiconGrid } from "@/components/lexicon";
@@ -31,7 +32,13 @@ export default async function ProgressPage() {
   const focus = coverage.lexicons.find((l) => l.list === coverage.focus) ?? null;
   // Le tableau du haut suit le lexique du niveau en cours (A1, puis A2…), le dernier s'ils sont tous complets.
   const shown = focus ?? coverage.lexicons[coverage.lexicons.length - 1];
-  const grid = await lexiconGrid(userId, shown.list);
+  const [grid, themes, week] = await Promise.all([
+    lexiconGrid(userId, shown.list),
+    shown.list === "a1" ? a1Themes(userId) : Promise.resolve([]),
+    weekReport(userId),
+  ]);
+  // Thèmes les plus incomplets d'abord : là où sont les trous.
+  const themesByGap = [...themes].sort((a, b) => a.known / a.size - b.known / b.size || b.size - a.size);
   const pct = Math.round((shown.known / shown.size) * 100);
 
   // Projection honnête : au rythme des 7 derniers jours, quand le lexique sera-t-il bouclé ?
@@ -80,6 +87,48 @@ export default async function ProgressPage() {
           <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-[2px] bg-[var(--cell-empty)]" /> à venir</span>
           <span>Une case par mot, des plus fréquents aux plus rares.</span>
         </p>
+      </section>
+
+      {themesByGap.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-[22px] font-semibold">Lexique A1 par thèmes</h2>
+          <p className="text-[15px] text-muted">Les groupes du lexique officiel, les plus incomplets d’abord : de petits objectifs à finir.</p>
+          <ul className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+            {themesByGap.map((t) => {
+              const done = t.known === t.size;
+              return (
+                <li key={t.id} className="space-y-1">
+                  <span className="flex items-baseline justify-between gap-2 text-[15px]">
+                    <span className={cn("min-w-0 truncate", done && "text-muted")}>{t.title}</span>
+                    <span className={cn("shrink-0 tabular-nums", done ? "text-known" : "text-muted")}>
+                      {done ? "✓ " : ""}
+                      {t.known}/{t.size}
+                    </span>
+                  </span>
+                  <span className="flex h-1.5 overflow-hidden rounded-full bg-[var(--cell-empty)]">
+                    <span className="bg-known" style={{ width: `${(t.known / t.size) * 100}%` }} />
+                    <span className="bg-learning" style={{ width: `${(t.learning / t.size) * 100}%` }} />
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      <section className="space-y-2">
+        <h2 className="text-[22px] font-semibold">Cette semaine</h2>
+        <p className="text-[17px]">
+          <span className="font-semibold tabular-nums">+{week.week}</span> mots connus en 7 jours, pour une moyenne de{" "}
+          {Math.round(week.average)} par semaine depuis le début.
+        </p>
+        {week.target && (
+          <p className={cn("text-[15px]", week.daysAhead >= 0 ? "text-known" : "text-wrong")}>
+            {week.daysAhead === 0
+              ? `Pile dans ton rythme : ${week.target.code} prévu le ${fmtDate(week.target.date)}.`
+              : `${Math.abs(week.daysAhead)} jour${Math.abs(week.daysAhead) > 1 ? "s" : ""} ${week.daysAhead > 0 ? "d’avance" : "de retard"} gagné${Math.abs(week.daysAhead) > 1 ? "s" : ""} cette semaine sur ${week.target.code} (prévu le ${fmtDate(week.target.date)} au rythme moyen).`}
+          </p>
+        )}
       </section>
 
       <section className="space-y-3">

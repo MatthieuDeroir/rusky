@@ -9,6 +9,8 @@
     { "path": "/api/cron/remind?slot=evening", "schedule": "0 17 * * *" },
     { "path": "/api/cron/remind?slot=evening", "schedule": "0 18 * * *" },
     { "path": "/api/cron/remind?slot=night", "schedule": "0 21 * * *" },
-    { "path": "/api/cron/remind?slot=night", "schedule": "0 22 * * *" }
+    { "path": "/api/cron/remind?slot=night", "schedule": "0 22 * * *" },
+    { "path": "/api/cron/remind?slot=weekly", "schedule": "0 18 * * 0" },
+    { "path": "/api/cron/remind?slot=weekly", "schedule": "0 19 * * 0" }
   ]
 }

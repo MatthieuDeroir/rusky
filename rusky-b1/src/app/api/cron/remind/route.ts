@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { parisDay } from "@/lib/dates";
-import { todayStatus } from "@/lib/learn";
+import { getProgress, lexiconCoverage, todayStatus } from "@/lib/learn";
+import { weekReport } from "@/lib/motivation";
 import { parisHour } from "@/lib/lessons";
 import { sendToUser, pushConfigured, type PushPayload } from "@/lib/push";
 
@@ -13,6 +14,8 @@ const SLOTS = {
   afternoon: { hour: 14, lesson: "apres-midi" },
   evening: { hour: 19, lesson: "soir" },
   night: { hour: 23, lesson: null },
+  // Récapitulatif de la semaine, le dimanche soir.
+  weekly: { hour: 20, lesson: null },
 } as const;
 type Slot = keyof typeof SLOTS;
 
@@ -44,6 +47,26 @@ function message(slot: Slot, st: Awaited<ReturnType<typeof todayStatus>>): PushP
   };
 }
 
+/** Récapitulatif du dimanche : court et factuel. */
+async function weeklyMessage(userId: string): Promise<PushPayload> {
+  const [week, cov, p] = await Promise.all([weekReport(userId), lexiconCoverage(userId), getProgress(userId)]);
+  const focus = cov.lexicons.find((l) => l.list === cov.focus);
+  const parts = [
+    `+${week.week} mots cette semaine (moyenne ${Math.round(week.average)})`,
+    focus ? `lexique ${focus.code} : ${focus.known}/${focus.size}` : null,
+    p.reading30 !== null ? `lecture ${Math.round(p.reading30 * 100)} %` : null,
+    week.target
+      ? `${week.target.code} prévu le ${new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(week.target.date + "T12:00:00Z"))}`
+      : null,
+  ].filter(Boolean);
+  return {
+    title: week.daysAhead > 0 ? `Semaine en avance de ${plural(week.daysAhead, "jour", "jours")}` : "Ta semaine en russe",
+    body: `${parts.join(" · ")}.`,
+    url: "/progres",
+    tag: "rusky-weekly",
+  };
+}
+
 export async function GET(req: NextRequest) {
   if (req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`)
     return NextResponse.json({ error: "non autorisé" }, { status: 401 });
@@ -52,12 +75,14 @@ export async function GET(req: NextRequest) {
   if (!pushConfigured()) return NextResponse.json({ error: "push non configuré" }, { status: 500 });
   const force = req.nextUrl.searchParams.get("force") === "1";
   if (!force && parisHour() !== SLOTS[slot].hour) return NextResponse.json({ skipped: "pas l’heure à Paris" });
+  const parisWeekday = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Paris", weekday: "short" }).format(new Date());
+  if (!force && slot === "weekly" && parisWeekday !== "Sun") return NextResponse.json({ skipped: "pas dimanche à Paris" });
 
   const day = parisDay();
   const users = [...new Set((await prisma.pushSubscription.findMany({ select: { userId: true } })).map((s) => s.userId))];
   const results: Record<string, string> = {};
   for (const userId of users) {
-    const payload = message(slot, await todayStatus(userId));
+    const payload = slot === "weekly" ? await weeklyMessage(userId) : message(slot, await todayStatus(userId));
     if (!payload) {
       results[userId] = "rien à rappeler";
       continue;

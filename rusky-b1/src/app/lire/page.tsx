@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { PasteText } from "@/components/paste-text";
 import { GenerateText } from "@/components/generate-text";
 import { cn } from "@/lib/utils";
+import { rereadSuggestions } from "@/lib/motivation";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Lire" };
@@ -27,6 +28,7 @@ export default async function ReadPage() {
     },
   });
   const mine = texts.filter((t) => t.source !== "corpus" && t.body);
+  const reread = await rereadSuggestions(userId);
   const corpus = texts
     .filter((t) => t.source === "corpus")
     .map((t) => ({ ...t, words: t.body.split(/\s+/).length }))
@@ -40,6 +42,28 @@ export default async function ReadPage() {
           La lecture compte pour un quart de l’examen. Lis sans aide d’abord, touche un mot seulement si tu bloques.
         </p>
       </header>
+
+      {reread.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-[19px] font-semibold">À relire</h2>
+          <p className="text-[15px] text-muted">Des textes lus il y a plus d’un mois : relis-les pour mesurer le chemin.</p>
+          <ul className="space-y-2">
+            {reread.map((r) => (
+              <li key={r.id}>
+                <Link
+                  href={`/lire/${r.id}`}
+                  className="flex items-baseline justify-between gap-3 rounded-2xl bg-surface px-4 py-3 shadow-[inset_0_0_0_1px_var(--line)] hover:bg-sunk/60"
+                >
+                  <span className="ru min-w-0 truncate text-[18px]">{r.title}</span>
+                  <span className="shrink-0 text-[15px] text-muted tabular-nums">
+                    lu le {fmt.format(r.readOn)} à {r.then} % → <span className="font-semibold text-known">{r.now} %</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="space-y-3">
         <h2 className="text-[19px] font-semibold">Générer un texte</h2>

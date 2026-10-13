@@ -78,7 +78,7 @@ export function Reminders() {
     <div className="space-y-3">
       <p className="text-muted">
         À 7 h, 14 h et 19 h (à l’heure près) pour les leçons du matin, de l’après-midi et du soir, seulement si elle
-        n’est pas faite ; à 23 h seulement si tu n’as rien fait de la journée.
+        n’est pas faite ; à 23 h seulement si tu n’as rien fait de la journée ; le dimanche à 20 h, le bilan de la semaine.
       </p>
       {state === "loading" && <p className="text-muted">…</p>}
       {state === "unsupported" && <p>Ce navigateur ne permet pas les notifications.</p>}
