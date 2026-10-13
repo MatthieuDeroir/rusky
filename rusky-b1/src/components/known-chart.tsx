@@ -39,7 +39,7 @@ function monthShort(m: string, withYear: boolean): string {
 /** Mots connus par mois. Ligne principale : tous les mots (le vocabulaire, qui donne le niveau),
  * avec les nouveaux mots du mois en barres. Une ligne par lexique conseillé (A1, A2, B1, B2).
  * Paliers jusqu'au prochain niveau en pointillés. Projections à la demande : chaque courbe
- * prolongée à son rythme moyen jusqu'à son objectif (lexique complet, ou prochain niveau). */
+ * prolongée au rythme moyen global jusqu'à son objectif (lexique complet, ou prochain niveau). */
 export function KnownChart({
   points,
   lexicons,
@@ -68,7 +68,7 @@ export function KnownChart({
   const n = points.length;
   const last = points[n - 1];
 
-  // Rythme moyen de chaque courbe : mots depuis le premier mois actif, mois en cours au prorata.
+  // Rythme moyen : mots par mois depuis le premier mois actif, mois en cours au prorata.
   const [ty, tm, td] = today.split("-").map(Number);
   const frac = td / new Date(Date.UTC(ty, tm, 0)).getUTCDate();
   const firstActive = points.findIndex((p) => p.allGained > 0);
@@ -77,11 +77,13 @@ export function KnownChart({
     { key: "all", code: "Tous", color: "var(--known)", cur: last.allTotal, target: next?.need ?? last.allTotal },
     ...lexicons.map((l) => ({ key: l.list as Series, code: l.code, color: LEX_COLOR[l.list], cur: last.lex[l.list], target: l.size })),
   ];
-  // Projection : valeurs de fin des mois suivants jusqu'à l'objectif.
+  // Projection : valeurs de fin des mois suivants jusqu'à l'objectif, au rythme GLOBAL (tous les
+  // mots par mois) pour chaque courbe : l'apprentissage est ciblé sur le lexique en cours, et les
+  // lexiques s'emboîtent (A1 ⊂ A2 ⊂ B1 ⊂ B2), donc chaque mot appris compte dans chacun d'eux.
+  const pace = elapsed > 0 ? last.allTotal / elapsed : 0;
   const projections = series
-    .filter((s) => shown.has(s.key) && s.cur < s.target && elapsed > 0 && s.cur > 0)
+    .filter((s) => shown.has(s.key) && s.cur < s.target && pace > 0)
     .map((s) => {
-      const pace = s.cur / elapsed;
       const vals: number[] = [];
       for (let j = 1; j <= MAX_MONTHS; j++) {
         const v = Math.min(s.target, s.cur + pace * (1 - frac + j - 1));
@@ -249,7 +251,9 @@ export function KnownChart({
             <i className="h-[3px] w-5 rounded-full" style={{ background: LEX_COLOR[l.list] }} /> lexique {l.code}
           </span>
         ))}
-        {projections.length > 0 && <span>Pointillés : projection au rythme moyen de chaque courbe.</span>}
+        {projections.length > 0 && (
+          <span>Pointillés : projection à ton rythme moyen ({Math.round(pace)} mots par mois), l’apprentissage ciblant le lexique en cours.</span>
+        )}
       </figcaption>
     </figure>
   );
