@@ -2,7 +2,7 @@
 // Ne met en cache QUE ce qui ne change jamais pour une URL donnée : le code et les styles de Next
 // (/_next/static/, noms uniques par version), les polices et les icônes. Les pages et les données
 // passent toujours par le réseau : jamais de contenu périmé, jamais de rechargement forcé.
-const CACHE = "rusky-static-v1";
+const CACHE = "rusky-static-v2";
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -10,7 +10,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith("rusky-") && k !== CACHE).map((k) => caches.delete(k))))
+      // Tous les autres caches, y compris ceux de l'ancienne app (pages en cache hors ligne) : sinon
+      // l'appareil peut continuer d'afficher l'ancienne version.
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
