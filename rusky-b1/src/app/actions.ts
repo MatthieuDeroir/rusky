@@ -36,7 +36,8 @@ export async function markKnownAction(entryIds: number[]) {
   for (const id of ids) await setWordStatus(userId, id, true);
   // Appris avant, souvent hors de l'app : daté sur les mois actifs, au prorata de chacun.
   await spreadKnownAt(userId, ids);
-  revalidatePath("/", "layout");
+  // Pas de revalidatePath ici : il ferait recalculer la page de tri à chaque lot (lent). Les
+  // pages sont dynamiques ; le retour vers Mots se fait par un rechargement complet.
 }
 
 /** Plusieurs réponses d'un coup (connexion lente : une requête au lieu de N), dans l'ordre. */

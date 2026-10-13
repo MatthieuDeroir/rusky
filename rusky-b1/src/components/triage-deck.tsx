@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Check, CloudOff, Loader2 } from "lucide-react";
-import { markKnownAction } from "@/app/actions";
+import { useRouter } from "next/navigation";
+import { invalidateAction, markKnownAction } from "@/app/actions";
 import { Button, wordMeta } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -43,7 +44,10 @@ function writeSkipped(list: string, ids: Set<number>) {
 /** Tri rapide d'un lexique : le mot et son sens ; → ou glisser à droite = je connais, ← ou glisser
  * à gauche = je ne connais pas. Les mots connus sont enregistrés par lots, avec nouvelles
  * tentatives en cas d'échec réseau. */
-export function TriageDeck({ list, label, left, cards }: { list: string; label: string; left: number; cards: TriageCard[] }) {
+export function TriageDeck(props: { list: string; label: string; left: number; cards: TriageCard[] }) {
+  // Figé à l'ouverture : un nouveau rendu du serveur ne doit pas raccourcir le paquet en cours.
+  const [{ list, label, left, cards }] = useState(props);
+  const router = useRouter();
   const [skipped, setSkipped] = useState<Set<number> | null>(null);
   const [i, setI] = useState(0);
   const [stats, setStats] = useState({ known: 0, unknown: 0 });
@@ -98,25 +102,37 @@ export function TriageDeck({ list, label, left, cards }: { list: string; label: 
 
   // Paquet de la visite : sans les mots passés lors des visites précédentes (l'état `skipped` est
   // lu une fois ; les mots passés pendant la visite ne sont écrits que sur l'appareil).
-  const deck = skipped ? cards.filter((c) => !skipped.has(c.id)) : [];
+  const deck = useMemo(() => (skipped ? cards.filter((c) => !skipped.has(c.id)) : []), [cards, skipped]);
   const card = deck[i];
+  // Position et mots passés tenus dans des références : deux appuis rapprochés (avant le rendu
+  // suivant) traitent bien deux cartes différentes, jamais deux fois la même.
+  const pos = useRef(0);
+  const passed = useRef<Set<number> | null>(null);
+  const sent = useRef(new Set<number>());
 
   const answer = useCallback(
     (known: boolean) => {
-      if (!card || !skipped) return;
+      if (!skipped) return;
+      const c = deck[pos.current];
+      if (!c) return;
+      pos.current += 1;
       if (known) {
-        queue.current.push(card.id);
-        setPending(queue.current.length);
-        void flush();
+        if (!sent.current.has(c.id)) {
+          sent.current.add(c.id);
+          queue.current.push(c.id);
+          setPending(queue.current.length);
+          void flush();
+        }
       } else {
-        const next = new Set(skipped).add(card.id);
-        writeSkipped(list, next);
+        passed.current ??= new Set(skipped);
+        passed.current.add(c.id);
+        writeSkipped(list, passed.current);
       }
       setStats((s) => (known ? { ...s, known: s.known + 1 } : { ...s, unknown: s.unknown + 1 }));
       setDrag(0);
-      setI((n) => n + 1);
+      setI(pos.current);
     },
-    [card, skipped, list, flush],
+    [deck, skipped, list, flush],
   );
 
   useEffect(() => {
@@ -139,7 +155,17 @@ export function TriageDeck({ list, label, left, cards }: { list: string; label: 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link href="/mots" className="text-[15px] text-muted hover:text-ink">
+        <Link
+          href="/mots"
+          prefetch={false}
+          onClick={async (e) => {
+            // Vide le cache de navigation : la page Mots affiche les comptes à jour.
+            e.preventDefault();
+            await invalidateAction().catch(() => {});
+            router.push("/mots");
+          }}
+          className="text-[15px] text-muted hover:text-ink"
+        >
           ← Mots
         </Link>
         <SaveBadge state={save} pending={pending} retry={() => void flush()} />
