@@ -74,7 +74,7 @@ export default async function ProgressPage() {
 
       <section className="space-y-3">
         <h2 className="text-[22px] font-semibold">Mots du lexique B1 connus, mois par mois</h2>
-        <KnownChart points={months} />
+        <KnownChart points={months} target={p.b1Total} today={parisDay()} examDate={p.examDate} />
         <p className="text-[14px] text-faint">
           Cumul à la fin de chaque mois. Un mot appris en leçon devient connu après deux jours de révisions réussies.
         </p>
