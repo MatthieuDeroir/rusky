@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -13,6 +14,9 @@ const nextConfig: NextConfig = {
     staleTimes: { dynamic: 120 },
   },
   turbopack: {
+    // Le dépôt contient aussi l'ancienne app (et son package-lock.json) à la racine : sans cela,
+    // Turbopack prendrait la racine du dépôt pour celle du projet.
+    root: path.join(__dirname),
     rules: {
       "*.css": {
         loaders: ["@tailwindcss/turbopack"],
