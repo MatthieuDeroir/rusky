@@ -267,18 +267,32 @@ export interface Level {
   missing: string[];
 }
 
-/** Liste de mots sur laquelle un palier se mesure (une seule série de sources : les lexiques
- * minimums Zlatoust du test, chacun incluant le précédent) :
- * - "top" : les `size` mots les plus fréquents du lexique B1 (pas de liste A1/A2 publique : on
- *   prend le niveau suivant, B1, restreint à ses mots les plus fréquents) ;
- * - "b1" : le lexique B1 ; "b2" : lexique B2 ∪ lexique B1 ;
- * - "all" : tous les mots connus (pas de liste publique pour C1, et aucune pour C2). */
-export type LevelList = "top" | "b1" | "b2" | "all";
+/** Liste de mots sur laquelle un palier se mesure. Une seule série de sources, les lexiques
+ * minimums Zlatoust du test, chacun incluant le précédent (les listes sont cumulées ici) :
+ * - "a1" : lexique A1 (ТЭУ) ;
+ * - "a2" : pas de liste A2 trouvée : lexique A1 + les mots les plus fréquents du lexique B1
+ *   (rang < 1 300), c'est-à-dire le niveau suivant restreint ;
+ * - "b1" : lexique B1 (+ A1) ; "b2" : lexique B2 (+ B1, A1) ;
+ * - "all" : tous les mots connus (pas de liste C1 trouvée, aucune pour C2). */
+export type LevelList = "a1" | "a2" | "b1" | "b2" | "all";
+/** Rang B1 sous lequel un mot compte dans la liste A2 de repli. */
+const A2_TOP_RANK = 1300;
+
+type ListEntry = { b1Rank: number | null; inA1Minimum: boolean; inB2Minimum: boolean };
+
+/** Le mot appartient-il à la liste ? */
+export function inList(list: LevelList, e: ListEntry): boolean {
+  if (list === "a1") return e.inA1Minimum;
+  if (list === "a2") return e.inA1Minimum || (e.b1Rank !== null && e.b1Rank < A2_TOP_RANK);
+  if (list === "b1") return e.inA1Minimum || e.b1Rank !== null;
+  if (list === "b2") return e.inA1Minimum || e.b1Rank !== null || e.inB2Minimum;
+  return true;
+}
 
 export interface LevelDef {
   code: string;
   list: LevelList;
-  /** Taille de la liste (pour "top" : le nombre de mots les plus fréquents retenus). */
+  /** Taille de la liste. */
   size: number;
   /** Mots de la liste à connaître pour atteindre le palier. */
   need: number;
@@ -295,16 +309,16 @@ export const LEVEL_SHARE = 0.8;
  * Non officiels, pour voir avancer : « − » à 80 % de la liste du niveau, « + » à mi-chemin entre
  * le niveau et le « − » suivant (mesuré sur la liste suivante). Ils ne se chevauchent jamais.
  * À l'examen, 66 % à chaque épreuve, d'où le seuil de lecture à partir de A2. */
-export function levelDefs(b1Size: number, b2Size: number): LevelDef[] {
+export function levelDefs(sizes: Record<"a1" | "a2" | "b1" | "b2", number>): LevelDef[] {
   const official: Omit<LevelDef, "need">[] = [
-    { code: "A1", list: "top", size: 780, reading: 0 },
-    { code: "A2", list: "top", size: 1300, reading: 0.66 },
-    { code: "B1", list: "b1", size: b1Size, reading: 0.66 },
-    { code: "B2", list: "b2", size: b2Size, reading: 0.66 },
+    { code: "A1", list: "a1", size: sizes.a1, reading: 0 },
+    { code: "A2", list: "a2", size: sizes.a2, reading: 0.66 },
+    { code: "B1", list: "b1", size: sizes.b1, reading: 0.66 },
+    { code: "B2", list: "b2", size: sizes.b2, reading: 0.66 },
     { code: "C1", list: "all", size: 11000, reading: 0.66 },
     { code: "C2", list: "all", size: 20000, reading: 0.66 },
   ];
-  const out: LevelDef[] = [{ code: "pré-A1", list: "top", size: 0, need: 0, reading: 0 }];
+  const out: LevelDef[] = [{ code: "pré-A1", list: "a1", size: 0, need: 0, reading: 0 }];
   official.forEach((l, i) => {
     out.push({ ...l, code: `${l.code}−`, need: Math.ceil(l.size * LEVEL_SHARE), reading: i ? official[i - 1].reading : 0 });
     out.push({ ...l, need: l.size });
@@ -315,18 +329,11 @@ export function levelDefs(b1Size: number, b2Size: number): LevelDef[] {
   return out;
 }
 
-/** Mots connus d'une liste. */
-export interface KnownWordLists {
-  b1Ranks: number[]; // b1Rank des mots connus du lexique B1
-  b2: number; // mots connus du lexique B2 ∪ B1
-  all: number;
-}
+/** Mots connus de chaque liste. */
+export type KnownWordLists = Record<LevelList, number>;
 
 export function knownIn(l: LevelDef, k: KnownWordLists): number {
-  if (l.list === "top") return k.b1Ranks.filter((r) => r < l.size).length;
-  if (l.list === "b1") return k.b1Ranks.length;
-  if (l.list === "b2") return k.b2;
-  return k.all;
+  return k[l.list];
 }
 
 export function estimateLevel(defs: LevelDef[], k: KnownWordLists, reading: number | null): Level {
@@ -340,14 +347,7 @@ export function estimateLevel(defs: LevelDef[], k: KnownWordLists, reading: numb
   const missing: string[] = [];
   if (next) {
     const n = next.need - knownIn(next, k);
-    const where =
-      next.list === "top"
-        ? `des ${next.size} mots les plus fréquents du lexique B1`
-        : next.list === "b1"
-          ? "du lexique B1"
-          : next.list === "b2"
-            ? "du lexique B2"
-            : "en tout";
+    const where = { a1: "du lexique A1", a2: "de la liste A2", b1: "du lexique B1", b2: "du lexique B2", all: "en tout" }[next.list];
     if (n > 0) missing.push(`${n} mots ${where}`);
     if (next.reading > 0 && (reading ?? 0) < next.reading)
       missing.push(`${Math.round(next.reading * 100)} % de réussite en lecture (actuellement ${reading === null ? "—" : Math.round(reading * 100) + " %"})`);
@@ -357,20 +357,18 @@ export function estimateLevel(defs: LevelDef[], k: KnownWordLists, reading: numb
 
 /** Mots connus par liste, et la date où chacun l'est devenu (rythmes, historique). */
 export async function knownWordLists(userId: string) {
-  const [words, b1Size, b2Size] = await Promise.all([
-    prisma.word.findMany({
-      where: { userId, status: "KNOWN" },
-      select: { knownAt: true, entry: { select: { b1Rank: true, inB2Minimum: true } } },
-    }),
-    prisma.dictionaryEntry.count({ where: { b1Rank: { not: null } } }),
-    prisma.dictionaryEntry.count({ where: { OR: [{ b1Rank: { not: null } }, { inB2Minimum: true }] } }),
+  const entrySel = { b1Rank: true, inA1Minimum: true, inB2Minimum: true } as const;
+  const [words, a1, a2, b1, b2] = await Promise.all([
+    prisma.word.findMany({ where: { userId, status: "KNOWN" }, select: { knownAt: true, entry: { select: entrySel } } }),
+    prisma.dictionaryEntry.count({ where: { inA1Minimum: true } }),
+    prisma.dictionaryEntry.count({ where: { OR: [{ inA1Minimum: true }, { b1Rank: { lt: A2_TOP_RANK } }] } }),
+    prisma.dictionaryEntry.count({ where: { OR: [{ inA1Minimum: true }, { b1Rank: { not: null } }] } }),
+    prisma.dictionaryEntry.count({ where: { OR: [{ inA1Minimum: true }, { b1Rank: { not: null } }, { inB2Minimum: true }] } }),
   ]);
-  const lists: KnownWordLists = {
-    b1Ranks: words.filter((w) => w.entry.b1Rank !== null).map((w) => w.entry.b1Rank!),
-    b2: words.filter((w) => w.entry.b1Rank !== null || w.entry.inB2Minimum).length,
-    all: words.length,
-  };
-  return { words, lists, defs: levelDefs(b1Size, b2Size) };
+  const lists = Object.fromEntries(
+    (["a1", "a2", "b1", "b2", "all"] as const).map((l) => [l, words.filter((w) => inList(l, w.entry)).length]),
+  ) as KnownWordLists;
+  return { words, lists, defs: levelDefs({ a1, a2, b1, b2 }) };
 }
 
 export interface LevelRung extends LevelDef {
@@ -520,11 +518,8 @@ export interface MonthPoint {
 }
 
 /** Le mot appartient-il à la liste du palier ? */
-function inLevelList(l: LevelDef, e: { b1Rank: number | null; inB2Minimum: boolean }): boolean {
-  if (l.list === "top") return e.b1Rank !== null && e.b1Rank < l.size;
-  if (l.list === "b1") return e.b1Rank !== null;
-  if (l.list === "b2") return e.b1Rank !== null || e.inB2Minimum;
-  return true;
+function inLevelList(l: LevelDef, e: ListEntry): boolean {
+  return inList(l.list, e);
 }
 
 /** Courbe cumulée des mots du lexique B1 connus, mois par mois : du mois précédant le premier mot
@@ -533,7 +528,7 @@ function inLevelList(l: LevelDef, e: { b1Rank: number | null; inB2Minimum: boole
 export async function knownByMonth(userId: string, level: LevelDef | null = null): Promise<MonthPoint[]> {
   const words = await prisma.word.findMany({
     where: { userId, status: "KNOWN", knownAt: { not: null } },
-    select: { knownAt: true, entry: { select: { b1Rank: true, inB2Minimum: true } } },
+    select: { knownAt: true, entry: { select: { b1Rank: true, inA1Minimum: true, inB2Minimum: true } } },
   });
   const gained = new Map<string, number>();
   const allGained = new Map<string, number>();

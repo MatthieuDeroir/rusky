@@ -4,11 +4,12 @@ import { cn } from "@/lib/utils";
 const fmtMonth = new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" });
 const nf = (n: number) => n.toLocaleString("fr-FR");
 
-const LIST_LABEL: Record<LevelRung["list"], (l: LevelRung) => string> = {
-  top: (l) => `les ${nf(l.size)} mots les plus fréquents du lexique B1`,
-  b1: () => "le lexique B1",
-  b2: () => "le lexique B2 (avec le B1)",
-  all: () => "tous les mots connus",
+const LIST_LABEL: Record<LevelRung["list"], string> = {
+  a1: "lexique A1",
+  a2: "liste A2",
+  b1: "lexique B1",
+  b2: "lexique B2",
+  all: "tous les mots",
 };
 
 /** L'échelle des paliers : pour chacun, la part de sa liste connue (le trait marque son seuil
@@ -35,7 +36,7 @@ export function LevelLadder({ rungs }: { rungs: LevelRung[] }) {
                 </span>
                 <span className="flex flex-wrap justify-between gap-x-3 text-[14px] text-muted">
                   <span className="tabular-nums">
-                    {nf(Math.min(r.known, r.need))} / {nf(r.need)} {r.list === "all" ? "mots" : `(${LIST_LABEL[r.list](r)})`}
+                    {nf(Math.min(r.known, r.need))} / {nf(r.need)} {r.list === "all" ? "mots" : `(${LIST_LABEL[r.list]})`}
                   </span>
                   <span>{done ? "atteint" : r.eta ? fmtMonth.format(new Date(r.eta + "-15T12:00:00Z")) : "—"}</span>
                 </span>
@@ -46,8 +47,8 @@ export function LevelLadder({ rungs }: { rungs: LevelRung[] }) {
       </ol>
       <p className="text-[14px] text-faint">
         Chaque palier se mesure sur sa liste de mots, tirée d’une même série : les lexiques minimums officiels du test
-        (éd. Zlatoust), chacun incluant le précédent. A1 et A2 n’ont pas de liste publique : ce sont les mots les plus
-        fréquents du lexique B1. C1 et C2 n’en ont pas non plus : tous tes mots connus comptent. Un niveau officiel
+        (éd. Zlatoust), chacun incluant le précédent. Pas de liste A2 trouvée : le lexique A1 et les mots les plus
+        fréquents du lexique B1. Pas de liste C1 ni C2 : tous tes mots connus comptent. Un niveau officiel
         est atteint quand toute sa liste est connue. Étapes non officielles : « − » à 80 % de la liste, « + » à
         mi-chemin du « − » suivant. Le mois est estimé à ton rythme moyen sur chaque liste.
       </p>

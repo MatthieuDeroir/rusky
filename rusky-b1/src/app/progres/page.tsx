@@ -30,13 +30,13 @@ export default async function ProgressPage() {
   const nextRung = ladder.find((r) => !/[+−]$/.test(r.code) && r.eta !== "atteint") ?? null;
   const months = await knownByMonth(userId, nextRung);
   const listLabel = (r: NonNullable<typeof nextRung>) =>
-    r.list === "top"
-      ? `mots connus parmi les ${r.size} plus fréquents`
-      : r.list === "b1"
-        ? "mots connus du lexique B1"
-        : r.list === "b2"
-          ? "mots connus du lexique B2"
-          : "tous les mots connus";
+    ({
+      a1: "mots connus du lexique A1",
+      a2: "mots connus de la liste A2",
+      b1: "mots connus du lexique B1",
+      b2: "mots connus du lexique B2",
+      all: "tous les mots connus",
+    })[r.list];
   const pct = Math.round((p.knownB1 / p.b1Total) * 100);
 
   // Projection honnête : au rythme des 7 derniers jours, quand le lexique sera-t-il bouclé ?
