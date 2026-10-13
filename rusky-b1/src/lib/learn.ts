@@ -396,9 +396,6 @@ export interface MonthPoint {
   total: number;
   /** Devenus connus pendant le mois. */
   gained: number;
-  /** Idem, tous les mots (lexique B1 et hors lexique). */
-  allTotal: number;
-  allGained: number;
 }
 
 /** Courbe cumulée des mots du lexique B1 connus, mois par mois : du mois précédant le premier mot
@@ -406,18 +403,16 @@ export interface MonthPoint {
  * connu (en leçon : après deux jours de révisions réussies). */
 export async function knownByMonth(userId: string): Promise<MonthPoint[]> {
   const words = await prisma.word.findMany({
-    where: { userId, status: "KNOWN", knownAt: { not: null } },
-    select: { knownAt: true, entry: { select: { b1Rank: true } } },
+    where: { userId, status: "KNOWN", knownAt: { not: null }, entry: { b1Rank: { not: null } } },
+    select: { knownAt: true },
   });
   const gained = new Map<string, number>();
-  const allGained = new Map<string, number>();
   for (const w of words) {
     const m = parisDay(w.knownAt!).slice(0, 7);
-    allGained.set(m, (allGained.get(m) ?? 0) + 1);
-    if (w.entry.b1Rank !== null) gained.set(m, (gained.get(m) ?? 0) + 1);
+    gained.set(m, (gained.get(m) ?? 0) + 1);
   }
   const current = parisDay().slice(0, 7);
-  const first = [...allGained.keys()].sort()[0] ?? current;
+  const first = [...gained.keys()].sort()[0] ?? current;
   const shift = (m: string, n: number) => {
     const [y, mo] = m.split("-").map(Number);
     const d = new Date(Date.UTC(y, mo - 1 + n, 1));
@@ -425,13 +420,10 @@ export async function knownByMonth(userId: string): Promise<MonthPoint[]> {
   };
   const points: MonthPoint[] = [];
   let total = 0;
-  let allTotal = 0;
   for (let m = shift(first, -1); m <= current; m = shift(m, 1)) {
     const g = gained.get(m) ?? 0;
-    const ag = allGained.get(m) ?? 0;
     total += g;
-    allTotal += ag;
-    points.push({ month: m, total, gained: g, allTotal, allGained: ag });
+    points.push({ month: m, total, gained: g });
   }
   return points;
 }

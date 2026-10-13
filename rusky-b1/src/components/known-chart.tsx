@@ -4,8 +4,8 @@ const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "aoû
 const fmtLong = new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" });
 /** Largeur d'un mois dans le dessin : les libellés (« sept. », « +211 ») ne se chevauchent pas. */
 const STEP = 60;
-const H = 360;
-const PAD = { top: 44, right: 34, bottom: 82, left: 34 };
+const H = 340;
+const PAD = { top: 44, right: 34, bottom: 62, left: 34 };
 const BAR_SHARE = 0.4;
 /** Au-delà, la projection n'a plus de sens (rythme trop faible). */
 const MAX_PROJECTED = 36;
@@ -101,13 +101,10 @@ export function KnownChart({
   const W = PAD.left + PAD.right + STEP * Math.max(1, n - 1);
   const plotH = H - PAD.top - PAD.bottom;
   const x = (i: number) => PAD.left + i * STEP;
-  // L'échelle couvre le lexique B1 et, s'il le dépasse, le total de tous les mots connus.
-  const yMax = Math.max(target, ...points.map((p) => p.allTotal));
-  const y = (v: number) => PAD.top + (1 - v / yMax) * plotH;
+  const y = (v: number) => PAD.top + (1 - v / target) * plotH;
   const base = y(0);
-  const maxGain = Math.max(1, ...points.map((p) => p.allGained));
+  const maxGain = Math.max(1, ...points.map((p) => p.gained));
   const barW = STEP * 0.5;
-  const allBarW = STEP * 0.72;
   const real = points.length;
   const lastReal = real - 1;
   const path = (from: number, to: number) =>
@@ -129,7 +126,7 @@ export function KnownChart({
           style={{ minWidth: Math.min(W, n * 40) }}
           className="w-full"
           role="img"
-          aria-label={`Mots du lexique B1 connus par mois : ${points.map((p) => `${monthShort(p.month, false)} ${p.total} (+${p.gained}), ${p.allTotal} en tout`).join(", ")}${proj.doneMonth ? `. Projection : ${nf(target)} en ${monthLong(proj.doneMonth)}` : ""}`}
+          aria-label={`Mots du lexique B1 connus par mois : ${points.map((p) => `${monthShort(p.month, false)} ${p.total} (+${p.gained})`).join(", ")}${proj.doneMonth ? `. Projection : ${nf(target)} en ${monthLong(proj.doneMonth)}` : ""}`}
         >
           {/* Objectif : tout le lexique */}
           <line x1={PAD.left} x2={W - PAD.right} y1={y(target)} y2={y(target)} stroke="var(--line)" strokeWidth="2" strokeDasharray="6 6" />
@@ -170,14 +167,7 @@ export function KnownChart({
               </text>
             </g>
           )}
-          {/* Tous les mots connus du mois (en fond, plus large et plus pâle) */}
-          {points.map((p, i) => {
-            if (!p.allGained) return null;
-            const h = (p.allGained / maxGain) * plotH * BAR_SHARE;
-            const bx = Math.min(Math.max(x(i) - allBarW / 2, PAD.left - 10), W - PAD.right + 10 - allBarW);
-            return <rect key={p.month} x={bx} y={base - h} width={allBarW} height={h} rx="6" fill="var(--known)" opacity="0.09" />;
-          })}
-          {/* Nouveaux mots B1 du mois (réel) */}
+          {/* Nouveaux mots du mois (réel) */}
           {points.map((p, i) => {
             if (!p.gained) return null;
             const h = (p.gained / maxGain) * plotH * BAR_SHARE;
@@ -189,15 +179,6 @@ export function KnownChart({
           {proj.points.length > 0 && (
             <path d={path(lastReal, n - 1)} fill="none" stroke="var(--known)" strokeWidth="3" strokeDasharray="2 9" strokeLinecap="round" />
           )}
-          {/* Tous les mots connus (discret) */}
-          <path
-            d={points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.allTotal).toFixed(1)}`).join(" ")}
-            fill="none"
-            stroke="var(--known)"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-            opacity="0.35"
-          />
           {/* Réel */}
           <path d={path(0, lastReal)} fill="none" stroke="var(--known)" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
           {all.map((p, i) => {
@@ -230,11 +211,6 @@ export function KnownChart({
                     {points[i].gained ? `+${points[i].gained}` : "–"}
                   </text>
                 )}
-                {isReal && points[i].allGained > 0 && (
-                  <text x={x(i)} y={base + 72} textAnchor={anchor(i)} fontSize="15" fill="var(--faint)">
-                    +{points[i].allGained}
-                  </text>
-                )}
               </g>
             );
           })}
@@ -242,13 +218,10 @@ export function KnownChart({
       </div>
       <figcaption className="flex flex-wrap gap-x-4 gap-y-1 text-[14px] text-muted">
         <span className="flex items-center gap-1.5">
-          <i className="h-[3px] w-4 rounded-full bg-known" /> lexique B1 connu
+          <i className="h-[3px] w-4 rounded-full bg-known" /> total connu
         </span>
         <span className="flex items-center gap-1.5">
-          <i className="size-2.5 rounded-[2px] bg-known/25" /> nouveaux mots B1 du mois
-        </span>
-        <span className="flex items-center gap-1.5">
-          <i className="h-[2px] w-4 rounded-full bg-known/40" /> tous les mots, B1 et autres (en pâle)
+          <i className="size-2.5 rounded-[2px] bg-known/25" /> nouveaux mots du mois
         </span>
         {proj.points.length > 0 && (
           <span className="flex items-center gap-1.5">
