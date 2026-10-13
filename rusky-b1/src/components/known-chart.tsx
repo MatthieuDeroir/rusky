@@ -5,10 +5,13 @@ import type { LevelList, MonthPoint } from "@/lib/learn";
 import { cn } from "@/lib/utils";
 
 const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
-/** Largeur d'un mois dans le dessin : les libellés (« sept. », « +211 ») ne se chevauchent pas. */
-const STEP = 80;
-const H = 380;
-const PAD = { top: 30, right: 150, bottom: 62, left: 34 };
+/** Largeur fixe du dessin (pas de défilement horizontal) : les mois se resserrent quand des
+ * projections en ajoutent, et les libellés s'espacent pour ne pas se chevaucher. */
+const W = 600;
+const H = 400;
+/** Écart minimal (unités du dessin) entre deux libellés de mois. */
+const MIN_LABEL_STEP = 62;
+const PAD = { top: 30, right: 128, bottom: 62, left: 30 };
 const BAR_SHARE = 0.35;
 /** Écart minimal entre deux étiquettes de fin de ligne. */
 const LABEL_GAP = 20;
@@ -97,14 +100,18 @@ export function KnownChart({
   const extra = Math.max(0, ...projections.map((p) => p.vals.length - 1));
   const cols = n + extra;
 
-  const W = PAD.left + PAD.right + STEP * Math.max(1, cols - 1);
+  const plotW = W - PAD.left - PAD.right;
+  const step = plotW / Math.max(1, cols - 1);
+  // Un libellé de mois sur `every` (toujours le premier et le dernier mois réel).
+  const every = Math.max(1, Math.ceil(MIN_LABEL_STEP / step));
+  const labelled = (i: number) => i % every === 0 || i === n - 1;
   const plotH = H - PAD.top - PAD.bottom;
-  const x = (i: number) => PAD.left + i * STEP;
+  const x = (i: number) => PAD.left + i * step;
   const yMax = Math.max(next?.need ?? 0, last.allTotal, ...projections.map((p) => p.target)) * 1.06;
   const y = (v: number) => PAD.top + (1 - v / yMax) * plotH;
   const base = y(0);
   const maxGain = Math.max(1, ...points.map((p) => p.allGained));
-  const barW = STEP * 0.5;
+  const barW = Math.min(44, step * 0.5);
   const anchor = (i: number) => (i === 0 ? "start" : "middle");
   const line = (val: (p: MonthPoint) => number) =>
     points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(val(p)).toFixed(1)}`).join(" ");
@@ -155,10 +162,9 @@ export function KnownChart({
           </button>
         ))}
       </div>
-      <div className="-mx-1 overflow-x-auto px-1">
+      <div>
         <svg
           viewBox={`0 0 ${W} ${H}`}
-          style={{ minWidth: Math.min(W, cols * 64 + 150) }}
           className="w-full"
           role="img"
           aria-label={`Mots connus par mois : ${points
@@ -212,22 +218,27 @@ export function KnownChart({
           {points.map((p, i) => (
             <g key={p.month}>
               <circle cx={x(i)} cy={y(p.allTotal)} r="6" fill="var(--surface)" stroke="var(--known)" strokeWidth="4" />
-              {i < n - 1 && p.allTotal > 0 && (
+              {i < n - 1 && p.allTotal > 0 && labelled(i) && (
                 <text x={x(i)} y={y(p.allTotal) - 14} textAnchor={anchor(i)} fontSize="18" fontWeight="600" fill="var(--ink)">
                   {p.allTotal}
                 </text>
               )}
-              <text x={x(i)} y={base + 26} textAnchor={anchor(i)} fontSize="18" fill="var(--muted)">
-                {monthShort(p.month, i === 0 || p.month.endsWith("-01"))}
-              </text>
-              <text x={x(i)} y={base + 50} textAnchor={anchor(i)} fontSize="17" fontWeight="600" fill="var(--known)">
-                {p.allGained ? `+${p.allGained}` : "–"}
-              </text>
+              {labelled(i) && (
+                <>
+                  <text x={x(i)} y={base + 26} textAnchor={anchor(i)} fontSize="18" fill="var(--muted)">
+                    {monthShort(p.month, i === 0 || p.month.endsWith("-01"))}
+                  </text>
+                  <text x={x(i)} y={base + 50} textAnchor={anchor(i)} fontSize="17" fontWeight="600" fill="var(--known)">
+                    {p.allGained ? `+${p.allGained}` : "–"}
+                  </text>
+                </>
+              )}
             </g>
           ))}
           {/* Mois projetés */}
           {Array.from({ length: extra }, (_, j) => {
             const m = addMonths(last.month, j + 1);
+            if (!labelled(n + j) || (n + j) - (n - 1) < every) return null;
             return (
               <text key={m} x={x(n + j)} y={base + 26} textAnchor="middle" fontSize="16" fill="var(--faint)">
                 {monthShort(m, m.endsWith("-01"))}
