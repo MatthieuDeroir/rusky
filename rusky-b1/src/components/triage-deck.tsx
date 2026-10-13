@@ -120,9 +120,15 @@ export function TriageDeck({ list, label, left, cards }: { list: string; label: 
   );
 
   useEffect(() => {
+    // Flèches, et 4 / 6 du pavé numérique, verrou numérique allumé ou éteint (éteint, selon le
+    // navigateur, la touche arrive en « ArrowLeft », « Left » ou sans nom : on lit aussi son code).
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight") answer(true);
-      else if (e.key === "ArrowLeft") answer(false);
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      const right = ["ArrowRight", "Right", "6"].includes(e.key) || e.code === "Numpad6";
+      const left = ["ArrowLeft", "Left", "4"].includes(e.key) || e.code === "Numpad4";
+      if (!right && !left) return;
+      e.preventDefault();
+      answer(right);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -141,7 +147,7 @@ export function TriageDeck({ list, label, left, cards }: { list: string; label: 
       <header className="space-y-1">
         <h1 className="text-[28px] font-semibold">Trier le {label}</h1>
         <p className="text-muted">
-          Tu le connais ? Flèche droite ou glisse à droite. Sinon, flèche gauche ou glisse à gauche : il reste à
+          Tu le connais ? Flèche droite (ou 6 du pavé numérique), ou glisse à droite. Sinon, flèche gauche (ou 4), ou glisse à gauche : il reste à
           apprendre, tes leçons s’en chargeront.
         </p>
       </header>
