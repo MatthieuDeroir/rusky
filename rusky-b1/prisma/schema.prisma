@@ -31,6 +31,8 @@ model DictionaryEntry {
   inB1Minimum    Boolean @default(false) // Lexique minimum B1 (ТРКИ-1)
   /// Rang dans le parcours B1 (ordre d'apprentissage, familles d'homonymes groupées). Null hors B1.
   b1Rank         Int?
+  /// Lexique minimum B2 (ТРКИ-2, éd. Zlatoust, ~5 100 unités) : sert à mesurer les paliers B1+ et B2.
+  inB2Minimum    Boolean @default(false)
   /// Carte vérifiée (passe IA sur les mots B1) : sens courant court + phrase d'exemple.
   glossFr        String?
   exampleRu      String?

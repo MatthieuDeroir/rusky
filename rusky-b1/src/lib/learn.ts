@@ -267,52 +267,149 @@ export interface Level {
   missing: string[];
 }
 
+/** Liste de mots sur laquelle un palier se mesure (une seule série de sources : les lexiques
+ * minimums Zlatoust du test, chacun incluant le précédent) :
+ * - "top" : les `size` mots les plus fréquents du lexique B1 (pas de liste A1/A2 publique : on
+ *   prend le niveau suivant, B1, restreint à ses mots les plus fréquents) ;
+ * - "b1" : le lexique B1 ; "b2" : lexique B2 ∪ lexique B1 ;
+ * - "all" : tous les mots connus (pas de liste publique pour C1, et aucune pour C2). */
+export type LevelList = "top" | "b1" | "b2" | "all";
+
 export interface LevelDef {
   code: string;
-  words: number;
+  list: LevelList;
+  /** Taille de la liste (pour "top" : le nombre de mots les plus fréquents retenus). */
+  size: number;
+  /** Mots de la liste à connaître pour atteindre le palier. */
+  need: number;
   reading: number;
-  /** Mots comptés : le lexique B1 jusqu'à B1, tous les mots connus au-delà (le lexique s'arrête là). */
-  scope: "b1" | "all";
 }
 
-/** Paliers de vocabulaire, d'après les lexiques minimums officiels du test (éd. Zlatoust) :
- * ТЭУ/A1 780 unités, ТБУ/A2 ~1 300, ТРКИ-1/B1 2 300 (ici le lexique B1 de l'app, 2 276),
- * ТРКИ-2/B2 ~5 100 (« немногим более 5000 »), ТРКИ-3/C1 « свыше 11 000 ». Pas de lexique pour
- * ТРКИ-4/C2 (niveau proche d'un natif cultivé) : 20 000, selon la règle « un niveau ≈ double le
- * vocabulaire » des mêmes auteurs. Les niveaux « + » sont à mi-chemin, pour voir avancer. À
- * l'examen, 66 % à chaque épreuve, d'où le seuil de lecture. Un palier non atteint bloque les suivants. */
-export const LEVELS: LevelDef[] = [
-  { code: "pré-A1", words: 0, reading: 0, scope: "b1" },
-  { code: "A1", words: 780, reading: 0, scope: "b1" },
-  { code: "A1+", words: 1040, reading: 0, scope: "b1" },
-  { code: "A2", words: 1300, reading: 0.66, scope: "b1" },
-  { code: "A2+", words: 1788, reading: 0.66, scope: "b1" },
-  { code: "B1", words: 2276, reading: 0.66, scope: "b1" },
-  { code: "B1+", words: 3700, reading: 0.66, scope: "all" },
-  { code: "B2", words: 5100, reading: 0.66, scope: "all" },
-  { code: "B2+", words: 8000, reading: 0.66, scope: "all" },
-  { code: "C1", words: 11000, reading: 0.66, scope: "all" },
-  { code: "C1+", words: 15500, reading: 0.66, scope: "all" },
-  { code: "C2", words: 20000, reading: 0.66, scope: "all" },
-];
+/** Part d'une liste à connaître pour atteindre un palier. */
+export const LEVEL_SHARE = 0.8;
 
-export function estimateLevel(knownB1: number, knownAll: number, reading: number | null): Level {
-  const count = (l: LevelDef) => (l.scope === "b1" ? knownB1 : knownAll);
+/** Paliers. Tailles officielles des lexiques minimums (éd. Zlatoust) : ТЭУ/A1 780 unités,
+ * ТБУ/A2 ~1 300, ТРКИ-1/B1 2 300 (ici 2 276), ТРКИ-2/B2 ~5 100 (ici 5 348 avec le B1),
+ * ТРКИ-3/C1 « свыше 11 000 » ; pas de lexique pour ТРКИ-4/C2 (20 000, règle « un niveau ≈ double
+ * le vocabulaire » des mêmes auteurs). Palier atteint à 80 % de sa liste ; les niveaux « + » sont
+ * à mi-chemin, pour voir avancer. À l'examen, 66 % à chaque épreuve, d'où le seuil de lecture. */
+export function levelDefs(b1Size: number, b2Size: number): LevelDef[] {
+  const top = (code: string, size: number, reading = 0): LevelDef => ({
+    code,
+    list: "top",
+    size,
+    need: Math.ceil(size * LEVEL_SHARE),
+    reading,
+  });
+  const b1Need = Math.ceil(b1Size * LEVEL_SHARE);
+  const b2Need = Math.ceil(b2Size * LEVEL_SHARE);
+  return [
+    { code: "pré-A1", list: "top", size: 0, need: 0, reading: 0 },
+    top("A1", 780),
+    top("A1+", 1040),
+    top("A2", 1300, 0.66),
+    top("A2+", 1788, 0.66),
+    { code: "B1", list: "b1", size: b1Size, need: b1Need, reading: 0.66 },
+    // B1+ : à mi-chemin entre B1 et B2, mesuré sur la liste B2.
+    { code: "B1+", list: "b2", size: b2Size, need: Math.round((b1Need + b2Need) / 2), reading: 0.66 },
+    { code: "B2", list: "b2", size: b2Size, need: b2Need, reading: 0.66 },
+    { code: "B2+", list: "all", size: 8000, need: 8000, reading: 0.66 },
+    { code: "C1", list: "all", size: 11000, need: 11000, reading: 0.66 },
+    { code: "C1+", list: "all", size: 15500, need: 15500, reading: 0.66 },
+    { code: "C2", list: "all", size: 20000, need: 20000, reading: 0.66 },
+  ];
+}
+
+/** Mots connus d'une liste. */
+export interface KnownWordLists {
+  b1Ranks: number[]; // b1Rank des mots connus du lexique B1
+  b2: number; // mots connus du lexique B2 ∪ B1
+  all: number;
+}
+
+export function knownIn(l: LevelDef, k: KnownWordLists): number {
+  if (l.list === "top") return k.b1Ranks.filter((r) => r < l.size).length;
+  if (l.list === "b1") return k.b1Ranks.length;
+  if (l.list === "b2") return k.b2;
+  return k.all;
+}
+
+export function estimateLevel(defs: LevelDef[], k: KnownWordLists, reading: number | null): Level {
   let i = 0;
-  for (let k = 1; k < LEVELS.length; k++) {
-    const l = LEVELS[k];
-    if (count(l) >= l.words && (l.reading === 0 || (reading ?? 0) >= l.reading)) i = k;
+  for (let j = 1; j < defs.length; j++) {
+    const l = defs[j];
+    if (knownIn(l, k) >= l.need && (l.reading === 0 || (reading ?? 0) >= l.reading)) i = j;
     else break;
   }
-  const next = LEVELS[i + 1];
+  const next = defs[i + 1];
   const missing: string[] = [];
   if (next) {
-    const n = next.words - count(next);
-    if (n > 0) missing.push(next.scope === "b1" ? `${n} mots du lexique B1` : `${n} mots connus en tout`);
+    const n = next.need - knownIn(next, k);
+    const where =
+      next.list === "top"
+        ? `des ${next.size} mots les plus fréquents du lexique B1`
+        : next.list === "b1"
+          ? "du lexique B1"
+          : next.list === "b2"
+            ? "du lexique B2"
+            : "en tout";
+    if (n > 0) missing.push(`${n} mots ${where}`);
     if (next.reading > 0 && (reading ?? 0) < next.reading)
       missing.push(`${Math.round(next.reading * 100)} % de réussite en lecture (actuellement ${reading === null ? "—" : Math.round(reading * 100) + " %"})`);
   }
-  return { code: LEVELS[i].code, next: next?.code ?? null, missing };
+  return { code: defs[i].code, next: next?.code ?? null, missing };
+}
+
+/** Mots connus par liste, et la date où chacun l'est devenu (rythmes, historique). */
+export async function knownWordLists(userId: string) {
+  const [words, b1Size, b2Size] = await Promise.all([
+    prisma.word.findMany({
+      where: { userId, status: "KNOWN" },
+      select: { knownAt: true, entry: { select: { b1Rank: true, inB2Minimum: true } } },
+    }),
+    prisma.dictionaryEntry.count({ where: { b1Rank: { not: null } } }),
+    prisma.dictionaryEntry.count({ where: { OR: [{ b1Rank: { not: null } }, { inB2Minimum: true }] } }),
+  ]);
+  const lists: KnownWordLists = {
+    b1Ranks: words.filter((w) => w.entry.b1Rank !== null).map((w) => w.entry.b1Rank!),
+    b2: words.filter((w) => w.entry.b1Rank !== null || w.entry.inB2Minimum).length,
+    all: words.length,
+  };
+  return { words, lists, defs: levelDefs(b1Size, b2Size) };
+}
+
+export interface LevelRung extends LevelDef {
+  known: number;
+  /** Mois estimé (YYYY-MM) au rythme moyen de cette liste ; "atteint" ; null si rythme nul. */
+  eta: string | "atteint" | null;
+}
+
+/** L'échelle des paliers : où j'en suis sur chaque liste, et quand je l'atteindrais au rythme
+ * moyen observé sur cette liste (mots devenus connus par mois depuis le premier mois actif). */
+export async function levelLadder(userId: string): Promise<LevelRung[]> {
+  const { words, lists, defs } = await knownWordLists(userId);
+  const today = parisDay();
+  const [y, mo, d] = today.split("-").map(Number);
+  const frac = d / new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const months = words.filter((w) => w.knownAt).map((w) => parisDay(w.knownAt!).slice(0, 7)).sort();
+  const first = months[0];
+  const elapsed = first
+    ? (y - Number(first.slice(0, 4))) * 12 + (mo - Number(first.slice(5, 7))) + frac
+    : 0;
+  const addMonths = (n: number) => {
+    const dt = new Date(Date.UTC(y, mo - 1 + n, 1));
+    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
+  };
+  return defs
+    .filter((l) => l.need > 0)
+    .map((l) => {
+      const known = knownIn(l, lists);
+      if (known >= l.need) return { ...l, known, eta: "atteint" as const };
+      const pace = elapsed > 0 ? known / elapsed : 0;
+      if (pace <= 0) return { ...l, known, eta: null };
+      const left = (l.need - known) / pace;
+      return { ...l, known, eta: addMonths(Math.max(0, Math.ceil(left - (1 - frac)))) };
+    });
 }
 
 export interface Progress {
@@ -336,7 +433,7 @@ export interface Progress {
 export async function getProgress(userId: string): Promise<Progress> {
   const since30 = parisDay(new Date(Date.now() - 30 * DAY_MS));
   const weekAgo = new Date(Date.now() - 7 * DAY_MS);
-  const [b1Total, knownB1, learningB1, knownAll, reading, newWeek, settings, days] = await Promise.all([
+  const [b1Total, knownB1, learningB1, knownAll, reading, newWeek, settings, days, lists] = await Promise.all([
     prisma.dictionaryEntry.count({ where: { b1Rank: { not: null } } }),
     prisma.word.count({ where: { userId, status: "KNOWN", entry: { b1Rank: { not: null } } } }),
     prisma.word.count({ where: { userId, status: "LEARNING", entry: { b1Rank: { not: null } } } }),
@@ -350,6 +447,7 @@ export async function getProgress(userId: string): Promise<Progress> {
     prisma.dayLog.findMany({ where: { userId, day: { gte: parisDay(weekAgo) }, newWords: { gt: 0 } }, select: { day: true, newWords: true } }),
     getSettings(userId),
     prisma.dayLog.findMany({ where: { userId }, select: { day: true }, orderBy: { day: "desc" }, take: 400 }),
+    knownWordLists(userId),
   ]);
   const rt = reading._sum.readingTotal ?? 0;
   const reading30 = rt > 0 ? (reading._sum.readingRight ?? 0) / rt : null;
@@ -373,7 +471,7 @@ export async function getProgress(userId: string): Promise<Progress> {
     knownAll,
     reading30,
     readingAnswers30: rt,
-    level: estimateLevel(knownB1, knownAll, reading30),
+    level: estimateLevel(lists.defs, lists.lists, reading30),
     pacePerDay,
     projectedDate,
     examDate: settings.examDate,
@@ -422,22 +520,34 @@ export interface MonthPoint {
   /** Idem, tous les mots (lexique B1 et hors lexique). */
   allTotal: number;
   allGained: number;
+  /** Mots connus de la liste du prochain palier (cumul), si un palier est suivi. */
+  levelTotal: number;
+}
+
+/** Le mot appartient-il à la liste du palier ? */
+function inLevelList(l: LevelDef, e: { b1Rank: number | null; inB2Minimum: boolean }): boolean {
+  if (l.list === "top") return e.b1Rank !== null && e.b1Rank < l.size;
+  if (l.list === "b1") return e.b1Rank !== null;
+  if (l.list === "b2") return e.b1Rank !== null || e.inB2Minimum;
+  return true;
 }
 
 /** Courbe cumulée des mots du lexique B1 connus, mois par mois : du mois précédant le premier mot
  * connu (point de départ à 0) jusqu'au mois en cours. Chaque mot compte au mois où il est devenu
  * connu (en leçon : après deux jours de révisions réussies). */
-export async function knownByMonth(userId: string): Promise<MonthPoint[]> {
+export async function knownByMonth(userId: string, level: LevelDef | null = null): Promise<MonthPoint[]> {
   const words = await prisma.word.findMany({
     where: { userId, status: "KNOWN", knownAt: { not: null } },
-    select: { knownAt: true, entry: { select: { b1Rank: true } } },
+    select: { knownAt: true, entry: { select: { b1Rank: true, inB2Minimum: true } } },
   });
   const gained = new Map<string, number>();
   const allGained = new Map<string, number>();
+  const levelGained = new Map<string, number>();
   for (const w of words) {
     const m = parisDay(w.knownAt!).slice(0, 7);
     allGained.set(m, (allGained.get(m) ?? 0) + 1);
     if (w.entry.b1Rank !== null) gained.set(m, (gained.get(m) ?? 0) + 1);
+    if (level && inLevelList(level, w.entry)) levelGained.set(m, (levelGained.get(m) ?? 0) + 1);
   }
   const current = parisDay().slice(0, 7);
   const first = [...allGained.keys()].sort()[0] ?? current;
@@ -449,12 +559,14 @@ export async function knownByMonth(userId: string): Promise<MonthPoint[]> {
   const points: MonthPoint[] = [];
   let total = 0;
   let allTotal = 0;
+  let levelTotal = 0;
   for (let m = shift(first, -1); m <= current; m = shift(m, 1)) {
     const g = gained.get(m) ?? 0;
     const ag = allGained.get(m) ?? 0;
     total += g;
     allTotal += ag;
-    points.push({ month: m, total, gained: g, allTotal, allGained: ag });
+    levelTotal += levelGained.get(m) ?? 0;
+    points.push({ month: m, total, gained: g, allTotal, allGained: ag, levelTotal });
   }
   return points;
 }
