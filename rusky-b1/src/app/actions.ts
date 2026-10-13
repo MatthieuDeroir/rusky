@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
 import { parisDay } from "@/lib/dates";
-import { cardsFor, keepWord, learnFromText, recordAnswer, setWordStatus, type Card } from "@/lib/learn";
+import { cardsFor, keepWord, learnFromText, recordAnswer, setWordStatus, spreadKnownAt, type Card } from "@/lib/learn";
 import { isSlot, reserveNewWords, type SlotId } from "@/lib/lessons";
 import { analysisCoverage, familiarEntryIds } from "@/lib/coverage";
 import { createDailyText, ensureQuestions, fillGeneratedText, type ComprehensionQuestion, type TextAnswer } from "@/lib/texts";
@@ -27,6 +27,16 @@ export async function setWordStatusAction(entryId: number, known: boolean): Prom
   const status = await setWordStatus(userId, entryId, known);
   revalidatePath("/", "layout");
   return status;
+}
+
+/** Tri rapide (Mots → trier un lexique) : ces mots sont déjà connus. Par lots, dans l'ordre. */
+export async function markKnownAction(entryIds: number[]) {
+  const userId = await currentUserId();
+  const ids = entryIds.slice(0, 100);
+  for (const id of ids) await setWordStatus(userId, id, true);
+  // Appris avant, souvent hors de l'app : daté sur les mois actifs, au prorata de chacun.
+  await spreadKnownAt(userId, ids);
+  revalidatePath("/", "layout");
 }
 
 /** Plusieurs réponses d'un coup (connexion lente : une requête au lieu de N), dans l'ordre. */

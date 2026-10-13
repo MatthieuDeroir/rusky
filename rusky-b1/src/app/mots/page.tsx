@@ -3,7 +3,7 @@ import Link from "next/link";
 import { currentUserId } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { normalizeBare } from "@/lib/grammar";
-import { accent, shortGloss } from "@/lib/learn";
+import { accent, lexiconCoverage, LEXICONS, listWhere, shortGloss } from "@/lib/learn";
 import { cn } from "@/lib/utils";
 import { WordList } from "@/components/word-list";
 import { RememberList } from "@/components/back-link";
@@ -91,6 +91,13 @@ export default async function WordsPage({ searchParams }: { searchParams: Promis
     }
   }
 
+  // Tri rapide par lexique : mots encore jamais rencontrés de chacun ; le lexique visé (le plus
+  // bas incomplet) en avant.
+  const [{ focus }, ...untouched] = await Promise.all([
+    lexiconCoverage(userId),
+    ...LEXICONS.map((l) => prisma.dictionaryEntry.count({ where: { AND: [listWhere(l.list), { words: { none: { userId } } }] } })),
+  ]);
+
   const href = (params: Record<string, string | number | undefined>) => {
     const u = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "" && v !== "all") u.set(k, String(v));
@@ -102,6 +109,30 @@ export default async function WordsPage({ searchParams }: { searchParams: Promis
     <div className="space-y-6">
       <RememberList />
       <h1 className="text-[32px] font-semibold">Mots</h1>
+
+      <section className="space-y-2" aria-label="Trier les mots par lexique">
+        <p className="text-[15px] text-muted">
+          Trier rapidement : une carte par mot, tu dis si tu le connais. Les autres restent à apprendre en leçon, en
+          commençant par le lexique de ton niveau.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {LEXICONS.map((l, i) => (
+            <Link
+              key={l.list}
+              href={`/mots/trier?liste=${l.list}`}
+              className={cn(
+                "rounded-xl px-3.5 py-2 text-[15px]",
+                l.list === focus
+                  ? "bg-cobalt text-cobalt-ink"
+                  : "bg-surface text-muted shadow-[inset_0_0_0_1px_var(--line)] hover:text-ink",
+              )}
+            >
+              <span className="font-semibold">{l.code}</span> · {untouched[i]} à trier
+              {l.list === focus ? " (en cours)" : ""}
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <form action="/mots" className="flex gap-2">
         <input

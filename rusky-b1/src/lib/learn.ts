@@ -240,6 +240,39 @@ export async function setWordStatus(userId: string, entryId: number, known: bool
   return known ? "KNOWN" : "LEARNING";
 }
 
+/** Mots déclarés connus au tri rapide (Mots → trier) : souvent appris avant, hors de l'app. Leur
+ * date « connu le » est répartie sur les mois déjà actifs, au prorata des mots connus de chaque
+ * mois (le mois le plus chargé en reçoit le plus) ; tirage déterministe par mot. */
+export async function spreadKnownAt(userId: string, entryIds: number[]) {
+  if (entryIds.length === 0) return;
+  const known = await prisma.word.findMany({
+    where: { userId, status: "KNOWN", knownAt: { not: null }, entryId: { notIn: entryIds } },
+    select: { knownAt: true },
+  });
+  const weight = new Map<string, number>();
+  for (const w of known) {
+    const m = parisDay(w.knownAt!).slice(0, 7);
+    weight.set(m, (weight.get(m) ?? 0) + 1);
+  }
+  const months = [...weight.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const total = months.reduce((a, [, n]) => a + n, 0);
+  if (total === 0) return;
+  const today = parisDay();
+  for (const entryId of entryIds) {
+    // Hachage du mot → position dans [0, 1) → mois selon les poids cumulés.
+    const h = ((entryId * 2654435761) >>> 0) / 2 ** 32;
+    let acc = 0;
+    const [month] = months.find(([, n]) => (acc += n / total) > h) ?? months[months.length - 1];
+    const [y, mo] = month.split("-").map(Number);
+    const last = month === today.slice(0, 7) ? Number(today.slice(8, 10)) : new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    const day = 1 + (((entryId * 40503) >>> 0) % last);
+    await prisma.word.update({
+      where: { userId_entryId: { userId, entryId } },
+      data: { knownAt: new Date(`${month}-${String(day).padStart(2, "0")}T10:00:00.000Z`) },
+    });
+  }
+}
+
 /** Un mot touché dans le lecteur et « gardé » : entre dans la file avec sa phrase. */
 export async function keepWord(userId: string, entryId: number, context: string, source: string) {
   const now = new Date();
