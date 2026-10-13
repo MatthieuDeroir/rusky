@@ -96,7 +96,7 @@ export default async function ProgressPage() {
           <p className="text-muted">Le vocabulaire et la lecture sont au niveau B1.</p>
         )}
         <p className="text-[14px] text-faint">
-          Estimation à partir du vocabulaire B1 connu (paliers jusqu’à B1 : 780, 1 300 et 2 276 mots, le lexique B1 complet ; au-delà, tous les mots connus : B2 10 000, C1 12 000, C2 20 000) et des réponses aux
+          Estimation à partir du vocabulaire B1 connu (paliers jusqu’à B1 : 780, 1 300 et 2 276 mots, le lexique B1 complet ; au-delà, tous les mots connus : B2 5 100, C1 11 000, C2 environ 20 000) et des réponses aux
           questions de lecture sur 30 jours.
         </p>
         <h3 className="pt-2 text-[19px] font-semibold">Ce qu’il faut maîtriser</h3>

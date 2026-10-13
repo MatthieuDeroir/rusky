@@ -275,10 +275,12 @@ export interface LevelDef {
   scope: "b1" | "all";
 }
 
-/** Paliers de vocabulaire. Officiels : ТЭУ/A1 780 mots, ТБУ/A2 1 300, ТРКИ-1/B1 « jusqu'à 2 300 »
- * (ici le lexique B1 de l'app, 2 276), ТРКИ-2/B2 ~10 000, ТРКИ-3/C1 ~12 000, ТРКИ-4/C2 ~20 000.
- * Les niveaux « + » sont à mi-chemin, pour voir avancer. À l'examen, 66 % à chaque épreuve, d'où
- * le seuil de lecture. Les niveaux se suivent : un palier non atteint bloque les suivants. */
+/** Paliers de vocabulaire, d'après les lexiques minimums officiels du test (éd. Zlatoust) :
+ * ТЭУ/A1 780 unités, ТБУ/A2 ~1 300, ТРКИ-1/B1 2 300 (ici le lexique B1 de l'app, 2 276),
+ * ТРКИ-2/B2 ~5 100 (« немногим более 5000 »), ТРКИ-3/C1 « свыше 11 000 ». Pas de lexique pour
+ * ТРКИ-4/C2 (niveau proche d'un natif cultivé) : 20 000, selon la règle « un niveau ≈ double le
+ * vocabulaire » des mêmes auteurs. Les niveaux « + » sont à mi-chemin, pour voir avancer. À
+ * l'examen, 66 % à chaque épreuve, d'où le seuil de lecture. Un palier non atteint bloque les suivants. */
 export const LEVELS: LevelDef[] = [
   { code: "pré-A1", words: 0, reading: 0, scope: "b1" },
   { code: "A1", words: 780, reading: 0, scope: "b1" },
@@ -286,11 +288,11 @@ export const LEVELS: LevelDef[] = [
   { code: "A2", words: 1300, reading: 0.66, scope: "b1" },
   { code: "A2+", words: 1788, reading: 0.66, scope: "b1" },
   { code: "B1", words: 2276, reading: 0.66, scope: "b1" },
-  { code: "B1+", words: 6138, reading: 0.66, scope: "all" },
-  { code: "B2", words: 10000, reading: 0.66, scope: "all" },
-  { code: "B2+", words: 11000, reading: 0.66, scope: "all" },
-  { code: "C1", words: 12000, reading: 0.66, scope: "all" },
-  { code: "C1+", words: 16000, reading: 0.66, scope: "all" },
+  { code: "B1+", words: 3700, reading: 0.66, scope: "all" },
+  { code: "B2", words: 5100, reading: 0.66, scope: "all" },
+  { code: "B2+", words: 8000, reading: 0.66, scope: "all" },
+  { code: "C1", words: 11000, reading: 0.66, scope: "all" },
+  { code: "C1+", words: 15500, reading: 0.66, scope: "all" },
   { code: "C2", words: 20000, reading: 0.66, scope: "all" },
 ];
 
