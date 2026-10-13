@@ -5,7 +5,7 @@
 //
 //   npx tsx scripts/import-from-legacy.ts
 //
-// Source : LEGACY_URL / LEGACY_TOKEN (par défaut TURSO_DATABASE_URL / TURSO_AUTH_TOKEN de ../.env).
+// Source : LEGACY_URL / LEGACY_TOKEN (par défaut TURSO_DATABASE_URL / TURSO_AUTH_TOKEN de ../.ancienne-app/.env).
 // Cible  : TARGET_URL / TARGET_TOKEN (par défaut la base locale prisma/dev.db).
 //
 // Idempotent : dictionnaire recopié seulement s'il manque des lignes, mots/textes insérés avec
@@ -17,7 +17,7 @@ import { parse } from "dotenv";
 import { createClient, type Client, type InStatement } from "@libsql/client";
 
 const ROOT = join(__dirname, "..");
-const legacyEnv = parse(readFileSync(join(ROOT, "..", ".env")));
+const legacyEnv = parse(readFileSync(join(ROOT, "..", ".ancienne-app", ".env")));
 const LEGACY_URL = process.env.LEGACY_URL ?? legacyEnv.TURSO_DATABASE_URL;
 const LEGACY_TOKEN = process.env.LEGACY_TOKEN ?? legacyEnv.TURSO_AUTH_TOKEN;
 const TARGET_URL = process.env.TARGET_URL ?? `file:${join(ROOT, "prisma/dev.db")}`;
@@ -83,7 +83,7 @@ function frequencyPercentiles(): Map<string, number> {
   ];
   const out = new Map<string, number>();
   for (const [file, type] of files) {
-    const lines = readFileSync(join(ROOT, "..", "data", file), "utf8").split("\n").slice(1).filter(Boolean);
+    const lines = readFileSync(join(ROOT, "data", file), "utf8").split("\n").slice(1).filter(Boolean);
     lines.forEach((line, i) => {
       // Les ~5 % de lignes finales ont été ajoutées hors classement (весь, лёгкий, хуже…) : pas de
       // rang fiable, on les laisse retomber sur la valeur par défaut de leur nature.
@@ -98,7 +98,7 @@ function frequencyPercentiles(): Map<string, number> {
 }
 
 async function main() {
-  if (!LEGACY_URL) throw new Error("Source introuvable (TURSO_DATABASE_URL de ../.env)");
+  if (!LEGACY_URL) throw new Error("Source introuvable (TURSO_DATABASE_URL de ../.ancienne-app/.env)");
   const src = createClient({ url: LEGACY_URL, authToken: LEGACY_TOKEN });
   const dst = createClient({ url: TARGET_URL, authToken: TARGET_TOKEN });
   console.log(`Source : ${LEGACY_URL.replace(/\/\/([^.]+)\./, "//….")} (lecture seule)`);

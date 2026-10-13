@@ -3,3 +3,7 @@ prisma/*.db
 prisma/*.db-*
 prisma/backups
 src/generated
+# Sources du dictionnaire : servent aux scripts, pas au site.
+data/*.csv
+data/_raw
+data/B1

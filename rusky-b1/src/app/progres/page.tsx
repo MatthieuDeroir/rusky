@@ -3,6 +3,7 @@ import { currentUserId } from "@/lib/auth";
 import { parisDay } from "@/lib/dates";
 import { activity, getProgress, getSettings, lexiconGrid, knownByMonth, LEVELS } from "@/lib/learn";
 import { KnownChart } from "@/components/known-chart";
+import { LevelRequirements } from "@/components/level-requirements";
 import { LexiconGrid } from "@/components/lexicon";
 import { SettingsForm } from "@/components/settings-form";
 import { Reminders } from "@/components/reminders";
@@ -73,10 +74,10 @@ export default async function ProgressPage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-[22px] font-semibold">Mots du lexique B1 connus, mois par mois</h2>
-        <KnownChart points={months} target={p.b1Total} today={parisDay()} examDate={p.examDate} levels={LEVELS} />
+        <h2 className="text-[22px] font-semibold">Mots connus, mois par mois</h2>
+        <KnownChart points={months} target={p.b1Total} today={parisDay()} levels={LEVELS} />
         <p className="text-[14px] text-faint">
-          Cumul à la fin de chaque mois. Un mot appris en leçon devient connu après deux jours de révisions réussies.
+          Cumul à la fin de chaque mois, nouveaux mots du mois en dessous. Les niveaux se comptent sur le lexique B1. Un mot appris en leçon devient connu après deux jours de révisions réussies.
         </p>
       </section>
 
@@ -95,9 +96,11 @@ export default async function ProgressPage() {
           <p className="text-muted">Le vocabulaire et la lecture sont au niveau B1.</p>
         )}
         <p className="text-[14px] text-faint">
-          Estimation à partir du vocabulaire B1 connu et des réponses aux questions de lecture (30 derniers jours). Le ТРКИ-1
-          comporte aussi l’écoute, l’écrit et l’oral.
+          Estimation à partir du vocabulaire B1 connu (seuils : 780, 1 300 et 2 276 mots, le lexique B1 complet) et des réponses aux
+          questions de lecture sur 30 jours.
         </p>
+        <h3 className="pt-2 text-[19px] font-semibold">Ce qu’il faut maîtriser</h3>
+        <LevelRequirements next={p.level.next} />
       </section>
 
       <section className="space-y-3">

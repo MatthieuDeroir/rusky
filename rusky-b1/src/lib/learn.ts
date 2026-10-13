@@ -261,19 +261,20 @@ export async function keepWord(userId: string, entryId: number, context: string,
 // ---- Progrès ---------------------------------------------------------------------------
 
 export interface Level {
-  code: string; // 'A1' | 'A1+' | 'A2' | 'A2+' | 'B1'
+  code: string; // 'pré-A1' | 'A1' | 'A2' | 'B1'
   next: string | null;
   /** Ce qui manque pour le niveau suivant, en clair. */
   missing: string[];
 }
 
-/** Seuils indicatifs (vocabulaire du parcours B1 connu + score de lecture sur 30 jours). */
+/** Seuils officiels du vocabulaire (programmes de l'Institut Pouchkine) : ТЭУ/A1 780 mots,
+ * ТБУ/A2 1 300, ТРКИ-1/B1 « jusqu’à 2 300 » : on prend le lexique B1 de l’app, 2 276 mots ; à l'examen, 66 % à
+ * chaque épreuve, d'où le seuil de lecture. */
 export const LEVELS: { code: string; words: number; reading: number }[] = [
-  { code: "A1", words: 0, reading: 0 },
-  { code: "A1+", words: 500, reading: 0 },
-  { code: "A2", words: 1000, reading: 0.6 },
-  { code: "A2+", words: 1500, reading: 0.6 },
-  { code: "B1", words: 1950, reading: 0.66 },
+  { code: "pré-A1", words: 0, reading: 0 },
+  { code: "A1", words: 780, reading: 0 },
+  { code: "A2", words: 1300, reading: 0.66 },
+  { code: "B1", words: 2276, reading: 0.66 },
 ];
 
 export function estimateLevel(knownB1: number, reading: number | null): Level {
@@ -396,6 +397,9 @@ export interface MonthPoint {
   total: number;
   /** Devenus connus pendant le mois. */
   gained: number;
+  /** Idem, tous les mots (lexique B1 et hors lexique). */
+  allTotal: number;
+  allGained: number;
 }
 
 /** Courbe cumulée des mots du lexique B1 connus, mois par mois : du mois précédant le premier mot
@@ -403,16 +407,18 @@ export interface MonthPoint {
  * connu (en leçon : après deux jours de révisions réussies). */
 export async function knownByMonth(userId: string): Promise<MonthPoint[]> {
   const words = await prisma.word.findMany({
-    where: { userId, status: "KNOWN", knownAt: { not: null }, entry: { b1Rank: { not: null } } },
-    select: { knownAt: true },
+    where: { userId, status: "KNOWN", knownAt: { not: null } },
+    select: { knownAt: true, entry: { select: { b1Rank: true } } },
   });
   const gained = new Map<string, number>();
+  const allGained = new Map<string, number>();
   for (const w of words) {
     const m = parisDay(w.knownAt!).slice(0, 7);
-    gained.set(m, (gained.get(m) ?? 0) + 1);
+    allGained.set(m, (allGained.get(m) ?? 0) + 1);
+    if (w.entry.b1Rank !== null) gained.set(m, (gained.get(m) ?? 0) + 1);
   }
   const current = parisDay().slice(0, 7);
-  const first = [...gained.keys()].sort()[0] ?? current;
+  const first = [...allGained.keys()].sort()[0] ?? current;
   const shift = (m: string, n: number) => {
     const [y, mo] = m.split("-").map(Number);
     const d = new Date(Date.UTC(y, mo - 1 + n, 1));
@@ -420,10 +426,13 @@ export async function knownByMonth(userId: string): Promise<MonthPoint[]> {
   };
   const points: MonthPoint[] = [];
   let total = 0;
+  let allTotal = 0;
   for (let m = shift(first, -1); m <= current; m = shift(m, 1)) {
     const g = gained.get(m) ?? 0;
+    const ag = allGained.get(m) ?? 0;
     total += g;
-    points.push({ month: m, total, gained: g });
+    allTotal += ag;
+    points.push({ month: m, total, gained: g, allTotal, allGained: ag });
   }
   return points;
 }

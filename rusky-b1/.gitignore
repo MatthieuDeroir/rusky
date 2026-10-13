@@ -46,3 +46,7 @@ next-env.d.ts
 /prisma/*.db-journal
 /prisma/backups/
 /src/generated/
+
+# Sources brutes volumineuses (dictionnaire OpenRussian, PDF du lexique B1) : locales
+/data/_raw/
+/data/B1/
