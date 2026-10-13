@@ -1,56 +1,58 @@
-import type { LevelRung } from "@/lib/learn";
+import type { LevelRung, LexiconCoverage } from "@/lib/learn";
 import { cn } from "@/lib/utils";
 
 const fmtMonth = new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" });
 const nf = (n: number) => n.toLocaleString("fr-FR");
 
-const LIST_LABEL: Record<LevelRung["list"], string> = {
-  a1: "lexique A1",
-  a2: "liste A2",
-  b1: "lexique B1",
-  b2: "lexique B2",
-  all: "tous les mots",
-};
-
-/** L'échelle des paliers : pour chacun, la part de sa liste connue (le trait marque son seuil
- * quand il n'est pas la liste entière), où j'en suis et le mois estimé à mon rythme. Les paliers
- * non officiels (« − », « + ») sont plus discrets. */
-export function LevelLadder({ rungs }: { rungs: LevelRung[] }) {
+/** L'échelle des paliers. Chaque palier se mesure sur tous les mots connus (barre principale,
+ * mois estimé à mon rythme) ; sous chaque niveau officiel, en plus discret, la part de son
+ * lexique conseillé déjà connue. Les paliers non officiels (« − », « + ») sont plus discrets. */
+export function LevelLadder({ rungs, lexicons }: { rungs: LevelRung[]; lexicons: LexiconCoverage[] }) {
   return (
     <div className="space-y-3">
       <ol className="space-y-2.5">
         {rungs.map((r) => {
-          const plus = /[+−]$/.test(r.code);
-          const pct = Math.min(1, r.known / r.size);
-          const mark = r.need / r.size;
+          const minor = /[+−]$/.test(r.code);
           const done = r.eta === "atteint";
+          const lex = !minor && r.lexicon ? lexicons.find((l) => l.list === r.lexicon) : undefined;
           return (
-            <li key={r.code} className={cn("grid grid-cols-[3rem_1fr] items-center gap-x-3", plus && "opacity-75")}>
-              <span className={cn("font-semibold", done ? "text-known" : "text-cobalt", plus ? "text-[15px]" : "text-[17px]")}>
+            <li key={r.code} className={cn("grid grid-cols-[3rem_1fr] items-start gap-x-3", minor && "opacity-75")}>
+              <span className={cn("font-semibold", done ? "text-known" : "text-cobalt", minor ? "text-[15px]" : "text-[17px]")}>
                 {r.code}
               </span>
-              <span className="min-w-0 space-y-1">
-                <span className={cn("relative block overflow-hidden rounded-full bg-[var(--cell-empty)]", plus ? "h-1.5" : "h-2.5")}>
-                  <span className={cn("absolute inset-y-0 left-0", done ? "bg-known" : "bg-cobalt")} style={{ width: `${pct * 100}%` }} />
-                  {mark < 1 && <span className="absolute inset-y-0 w-0.5 bg-ink/50" style={{ left: `${mark * 100}%` }} />}
+              <span className="min-w-0 space-y-1 pt-1.5">
+                <span className={cn("relative block overflow-hidden rounded-full bg-[var(--cell-empty)]", minor ? "h-1.5" : "h-2.5")}>
+                  <span
+                    className={cn("absolute inset-y-0 left-0", done ? "bg-known" : "bg-cobalt")}
+                    style={{ width: `${Math.min(1, r.known / r.need) * 100}%` }}
+                  />
                 </span>
                 <span className="flex flex-wrap justify-between gap-x-3 text-[14px] text-muted">
                   <span className="tabular-nums">
-                    {nf(Math.min(r.known, r.need))} / {nf(r.need)} {r.list === "all" ? "mots" : `(${LIST_LABEL[r.list]})`}
+                    {nf(Math.min(r.known, r.need))} / {nf(r.need)} mots
                   </span>
                   <span>{done ? "atteint" : r.eta ? fmtMonth.format(new Date(r.eta + "-15T12:00:00Z")) : "—"}</span>
                 </span>
+                {lex && (
+                  <span className="flex items-center gap-2 text-[13px] text-faint">
+                    <span className="relative block h-1 w-24 shrink-0 overflow-hidden rounded-full bg-[var(--cell-empty)]">
+                      <span className="absolute inset-y-0 left-0 bg-ink/40" style={{ width: `${(lex.known / lex.size) * 100}%` }} />
+                    </span>
+                    <span className="tabular-nums">
+                      {lex.label} : {nf(lex.known)} / {nf(lex.size)}
+                    </span>
+                  </span>
+                )}
               </span>
             </li>
           );
         })}
       </ol>
       <p className="text-[14px] text-faint">
-        Chaque palier se mesure sur sa liste de mots, tirée d’une même série : les lexiques minimums officiels du test
-        (éd. Zlatoust), chacun incluant le précédent. Pas de liste A2 trouvée : le lexique A1 et les mots les plus
-        fréquents du lexique B1. Pas de liste C1 ni C2 : tous tes mots connus comptent. Un niveau officiel
-        est atteint quand toute sa liste est connue. Étapes non officielles : « − » à 80 % de la liste, « + » à
-        mi-chemin du « − » suivant. Le mois est estimé à ton rythme moyen sur chaque liste.
+        Le niveau se mesure sur tous tes mots connus : A1 780, A2 1 300, B1 2 276, B2 5 100, C1 11 000, C2 20 000 (tailles
+        des lexiques officiels du test). Étapes non officielles : « − » à 80 % du seuil, « + » à mi-chemin du « − » suivant.
+        Sous chaque niveau, la part de son lexique conseillé (éd. Zlatoust ; pas de liste A2 trouvée : lexique A1 et mots
+        les plus fréquents du B1). Les leçons comblent d’abord le lexique du plus bas niveau incomplet.
       </p>
     </div>
   );

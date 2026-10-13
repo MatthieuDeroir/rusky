@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { currentUserId } from "@/lib/auth";
 import { parisDay } from "@/lib/dates";
-import { activity, getProgress, getSettings, lexiconGrid, knownByMonth, levelLadder } from "@/lib/learn";
+import { activity, getProgress, getSettings, lexiconCoverage, lexiconGrid, knownByMonth, levelLadder } from "@/lib/learn";
 import { LevelLadder } from "@/components/level-ladder";
 import { KnownChart } from "@/components/known-chart";
 import { LevelRequirements } from "@/components/level-requirements";
@@ -18,25 +18,18 @@ const fmtDate = (d: string) => fmtLong.format(new Date(d + "T12:00:00Z"));
 
 export default async function ProgressPage() {
   const userId = await currentUserId();
-  const [p, grid, act, settings, ladder] = await Promise.all([
+  const [p, grid, act, settings, ladder, coverage, months] = await Promise.all([
     getProgress(userId),
     lexiconGrid(userId),
     activity(userId),
     getSettings(userId),
     levelLadder(userId),
+    lexiconCoverage(userId),
+    knownByMonth(userId),
   ]);
-  // Le graphique ne suit que le prochain palier officiel (pas les « − » ni les « + ») : l'échelle
-  // reste à sa hauteur et les barres lisibles.
+  // Prochain niveau officiel (ni « − » ni « + ») : seuil tracé sur le graphique.
   const nextRung = ladder.find((r) => !/[+−]$/.test(r.code) && r.eta !== "atteint") ?? null;
-  const months = await knownByMonth(userId, nextRung);
-  const listLabel = (r: NonNullable<typeof nextRung>) =>
-    ({
-      a1: "mots connus du lexique A1",
-      a2: "mots connus de la liste A2",
-      b1: "mots connus du lexique B1",
-      b2: "mots connus du lexique B2",
-      all: "tous les mots connus",
-    })[r.list];
+  const focus = coverage.lexicons.find((l) => l.list === coverage.focus) ?? null;
   const pct = Math.round((p.knownB1 / p.b1Total) * 100);
 
   // Projection honnête : au rythme des 7 derniers jours, quand le lexique sera-t-il bouclé ?
@@ -90,8 +83,15 @@ export default async function ProgressPage() {
         <h2 className="text-[22px] font-semibold">Mots connus, mois par mois</h2>
         <KnownChart
           points={months}
-          next={nextRung && { code: nextRung.code, need: nextRung.need, listLabel: listLabel(nextRung) }}
+          lexicons={coverage.lexicons}
+          next={nextRung && { code: nextRung.code, need: nextRung.need }}
         />
+        {focus && (
+          <p className="text-[17px]">
+            En leçon, les mots nouveaux viennent du <span className="font-semibold">lexique {focus.code}</span> : il t’en
+            manque {focus.size - focus.known} sur {focus.size}.
+          </p>
+        )}
         <p className="text-[14px] text-faint">
           Cumul à la fin de chaque mois, nouveaux mots du mois en dessous. Un mot appris en leçon devient connu après deux jours de révisions réussies.
         </p>
@@ -111,7 +111,7 @@ export default async function ProgressPage() {
         ) : (
           <p className="text-muted">Tous les paliers sont atteints.</p>
         )}
-        <LevelLadder rungs={ladder} />
+        <LevelLadder rungs={ladder} lexicons={coverage.lexicons} />
         <h3 className="pt-2 text-[19px] font-semibold">Ce qu’il faut maîtriser</h3>
         <LevelRequirements next={nextRung?.code ?? null} />
       </section>

@@ -1,89 +1,109 @@
-import type { MonthPoint } from "@/lib/learn";
+import type { LevelList, MonthPoint } from "@/lib/learn";
 
 const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 /** Largeur d'un mois dans le dessin : les libellés (« sept. », « +211 ») ne se chevauchent pas. */
 const STEP = 80;
-const H = 360;
-const PAD = { top: 30, right: 44, bottom: 82, left: 34 };
-const BAR_SHARE = 0.4;
+const H = 380;
+const PAD = { top: 30, right: 112, bottom: 62, left: 34 };
+const BAR_SHARE = 0.35;
+/** Écart minimal entre deux étiquettes de fin de ligne. */
+const LABEL_GAP = 20;
+
+/** Une couleur franche par lexique, lisible en clair comme en sombre. */
+const LEX_COLOR: Record<LevelList, string> = {
+  a1: "#d99a00",
+  a2: "#e2602a",
+  b1: "#c8336f",
+  b2: "#7b45e0",
+};
 
 function monthShort(m: string, withYear: boolean): string {
   const [y, mo] = m.split("-").map(Number);
   return withYear ? `${MONTHS[mo - 1]} ${String(y).slice(2)}` : MONTHS[mo - 1];
 }
 
-
-/** Mots connus par mois : le lexique B1 (ligne et barres vertes, « +n ») et, en pâle, tous les mots
- * (B1 et hors lexique, chiffre gris). */
+/** Mots connus par mois. Ligne principale : tous les mots (le vocabulaire, qui donne le niveau),
+ * avec les nouveaux mots du mois en barres. Une ligne par lexique conseillé (A1, A2, B1, B2) :
+ * où j'en suis de chacun. Seuil du prochain niveau en pointillés. */
 export function KnownChart({
   points,
+  lexicons,
   next,
 }: {
   points: MonthPoint[];
-  /** Prochain palier officiel : sa ligne (mots connus de sa liste) et son seuil. */
-  next: { code: string; need: number; listLabel: string } | null;
+  lexicons: { list: LevelList; code: string; size: number }[];
+  /** Prochain niveau officiel (tous les mots). */
+  next: { code: string; need: number } | null;
 }) {
   const n = points.length;
   const W = PAD.left + PAD.right + STEP * Math.max(1, n - 1);
   const plotH = H - PAD.top - PAD.bottom;
   const x = (i: number) => PAD.left + i * STEP;
-  // L'échelle s'arrête au prochain palier (ou à tous les mots s'ils le dépassent) : les barres
-  // restent lisibles.
-  const yMax = Math.max(next?.need ?? 0, ...points.map((p) => p.allTotal)) * 1.05;
+  const last = points[n - 1];
+  const yMax = Math.max(next?.need ?? 0, last.allTotal) * 1.06;
   const y = (v: number) => PAD.top + (1 - v / yMax) * plotH;
   const base = y(0);
   const maxGain = Math.max(1, ...points.map((p) => p.allGained));
-  const barW = STEP * 0.42;
-  const allBarW = STEP * 0.62;
-  const anchor = (i: number) => (i === 0 ? "start" : i === n - 1 ? "end" : "middle");
+  const barW = STEP * 0.5;
+  const anchor = (i: number) => (i === 0 ? "start" : "middle");
   const line = (val: (p: MonthPoint) => number) =>
     points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(val(p)).toFixed(1)}`).join(" ");
-  const bar = (i: number, v: number, w: number) => {
-    const h = (v / maxGain) * plotH * BAR_SHARE;
-    const bx = Math.min(Math.max(x(i) - w / 2, PAD.left - 10), W - PAD.right + 10 - w);
-    return { x: bx, y: base - h, width: w, height: h };
-  };
+
+  // Étiquettes de fin de ligne, écartées pour ne pas se chevaucher (du haut vers le bas).
+  const ends = [
+    { key: "all", text: `Tous ${last.allTotal}`, color: "var(--known)", v: last.allTotal, bold: true },
+    ...lexicons.map((l) => ({
+      key: l.list,
+      text: `${l.code} ${last.lex[l.list]}/${l.size}`,
+      color: LEX_COLOR[l.list],
+      v: last.lex[l.list],
+      bold: false,
+    })),
+  ]
+    .map((e) => ({ ...e, ly: y(e.v) }))
+    .sort((a, b) => a.ly - b.ly);
+  for (let i = 1; i < ends.length; i++) ends[i].ly = Math.max(ends[i].ly, ends[i - 1].ly + LABEL_GAP);
 
   return (
     <figure className="space-y-3">
       <div className="-mx-1 overflow-x-auto px-1">
         <svg
           viewBox={`0 0 ${W} ${H}`}
-          style={{ minWidth: Math.min(W, n * 56) }}
+          style={{ minWidth: Math.min(W, n * 64 + 110) }}
           className="w-full"
           role="img"
           aria-label={`Mots connus par mois : ${points
-            .map((p) => `${monthShort(p.month, false)} ${p.total} du lexique B1 (+${p.gained}), ${p.allTotal} en tout (+${p.allGained})`)
-            .join(", ")}`}
+            .map((p) => `${monthShort(p.month, false)} ${p.allTotal} (+${p.allGained})`)
+            .join(", ")}. Lexiques : ${lexicons.map((l) => `${l.code} ${last.lex[l.list]} sur ${l.size}`).join(", ")}`}
         >
-          {/* Barres : tous les mots (fond pâle), puis le lexique B1 */}
-          {points.map((p, i) => p.allGained > 0 && <rect key={`a${p.month}`} {...bar(i, p.allGained, allBarW)} rx="6" fill="var(--known)" opacity="0.1" />)}
-          {points.map((p, i) => p.gained > 0 && <rect key={`b${p.month}`} {...bar(i, p.gained, barW)} rx="5" fill="var(--known)" opacity="0.24" />)}
-          <line x1={PAD.left - 10} x2={W - PAD.right + 10} y1={base} y2={base} stroke="var(--line)" strokeWidth="2" />
-          {/* Prochain palier : seuil (pointillés) et mots connus de sa liste (bleu) */}
+          {/* Nouveaux mots du mois */}
+          {points.map((p, i) => {
+            if (!p.allGained) return null;
+            const h = (p.allGained / maxGain) * plotH * BAR_SHARE;
+            const bx = Math.max(x(i) - barW / 2, PAD.left - 10);
+            return <rect key={p.month} x={bx} y={base - h} width={barW} height={h} rx="5" fill="var(--known)" opacity="0.16" />;
+          })}
+          <line x1={PAD.left - 10} x2={x(n - 1) + 10} y1={base} y2={base} stroke="var(--line)" strokeWidth="2" />
+          {/* Prochain niveau */}
           {next && (
             <g>
-              <line x1={PAD.left} x2={W - PAD.right} y1={y(next.need)} y2={y(next.need)} stroke="var(--cobalt)" strokeWidth="2" strokeDasharray="4 7" opacity="0.6" />
-              <text x={W - PAD.right + 6} y={y(next.need) + 6} fontSize="18" fontWeight="600" fill="var(--cobalt)">
-                {next.code}
-              </text>
-              <path d={line((p) => p.levelTotal)} fill="none" stroke="var(--cobalt)" strokeWidth="3" strokeLinejoin="round" opacity="0.8" />
-              <text x={x(n - 1)} y={y(points[n - 1].levelTotal) - 12} textAnchor="end" fontSize="17" fontWeight="600" fill="var(--cobalt)">
-                {points[n - 1].levelTotal}
+              <line x1={PAD.left} x2={x(n - 1)} y1={y(next.need)} y2={y(next.need)} stroke="var(--cobalt)" strokeWidth="2" strokeDasharray="4 7" opacity="0.6" />
+              <text x={PAD.left} y={y(next.need) - 8} fontSize="16" fontWeight="600" fill="var(--cobalt)">
+                {next.code} : {next.need} mots
               </text>
             </g>
           )}
-          {/* Lignes : tous les mots (pâle), puis le lexique B1 */}
-          <path d={line((p) => p.allTotal)} fill="none" stroke="var(--known)" strokeWidth="2.5" strokeLinejoin="round" opacity="0.35" />
-          <path d={line((p) => p.total)} fill="none" stroke="var(--known)" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
+          {/* Lexiques conseillés */}
+          {lexicons.map((l) => (
+            <path key={l.list} d={line((p) => p.lex[l.list])} fill="none" stroke={LEX_COLOR[l.list]} strokeWidth="2.5" strokeLinejoin="round" />
+          ))}
+          {/* Tous les mots : la ligne principale */}
+          <path d={line((p) => p.allTotal)} fill="none" stroke="var(--known)" strokeWidth="5" strokeLinejoin="round" strokeLinecap="round" />
           {points.map((p, i) => (
             <g key={p.month}>
-              <circle cx={x(i)} cy={y(p.total)} r="6" fill="var(--surface)" stroke="var(--known)" strokeWidth="4" />
-              <text x={x(i)} y={y(p.total) + 28} textAnchor={anchor(i)} fontSize="20" fontWeight="600" fill="var(--ink)">
-                {p.total}
-              </text>
-              {p.allTotal > p.total && (
-                <text x={x(i)} y={y(p.allTotal) - 12} textAnchor={anchor(i)} fontSize="16" fill="var(--faint)">
+              <circle cx={x(i)} cy={y(p.allTotal)} r="6" fill="var(--surface)" stroke="var(--known)" strokeWidth="4" />
+              {i < n - 1 && p.allTotal > 0 && (
+                <text x={x(i)} y={y(p.allTotal) - 14} textAnchor={anchor(i)} fontSize="18" fontWeight="600" fill="var(--ink)">
                   {p.allTotal}
                 </text>
               )}
@@ -91,29 +111,27 @@ export function KnownChart({
                 {monthShort(p.month, i === 0 || p.month.endsWith("-01"))}
               </text>
               <text x={x(i)} y={base + 50} textAnchor={anchor(i)} fontSize="17" fontWeight="600" fill="var(--known)">
-                {p.gained ? `+${p.gained}` : "–"}
+                {p.allGained ? `+${p.allGained}` : "–"}
               </text>
-              {p.allGained > 0 && (
-                <text x={x(i)} y={base + 72} textAnchor={anchor(i)} fontSize="15" fill="var(--faint)">
-                  +{p.allGained}
-                </text>
-              )}
             </g>
+          ))}
+          {/* Étiquettes de fin de ligne */}
+          {ends.map((e) => (
+            <text key={e.key} x={x(n - 1) + 14} y={e.ly + 6} fontSize={e.bold ? 18 : 16} fontWeight={e.bold ? 700 : 600} fill={e.color}>
+              {e.text}
+            </text>
           ))}
         </svg>
       </div>
       <figcaption className="flex flex-wrap gap-x-4 gap-y-1 text-[14px] text-muted">
         <span className="flex items-center gap-1.5">
-          <i className="h-[3px] w-4 rounded-full bg-known" /> lexique B1 (vert, chiffre noir)
+          <i className="h-[4px] w-5 rounded-full bg-known" /> tous les mots (niveau)
         </span>
-        <span className="flex items-center gap-1.5">
-          <i className="h-[2px] w-4 rounded-full bg-known/40" /> tous les mots (pâle, chiffre gris)
-        </span>
-        {next && (
-          <span className="flex items-center gap-1.5">
-            <i className="h-[3px] w-4 rounded-full bg-cobalt/80" /> {next.code} : {next.listLabel}, seuil {next.need} en pointillés
+        {lexicons.map((l) => (
+          <span key={l.list} className="flex items-center gap-1.5">
+            <i className="h-[3px] w-5 rounded-full" style={{ background: LEX_COLOR[l.list] }} /> lexique {l.code}
           </span>
-        )}
+        ))}
       </figcaption>
     </figure>
   );

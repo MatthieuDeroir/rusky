@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { parisDay } from "@/lib/dates";
-import { cardsFor, type Card } from "@/lib/learn";
+import { cardsFor, inList, LEXICONS, lexiconCoverage, listWhere, type Card } from "@/lib/learn";
 
 /** Trois leçons par jour. Chacune : révisions → texte avec les mots connus → texte avec
  * 10 mots nouveaux. */
@@ -56,14 +56,25 @@ function shuffle<T>(xs: T[]): T[] {
  *   (d'une leçon à l'autre, ce ne sont pas toujours les mêmes) ; les mots simplement déclarés
  *   connus depuis la liste ou importés de Duolingo n'en font pas partie : ils n'ont pas été appris
  *   cette semaine dans l'app.
- * - 20 au hasard parmi tous les autres.
+ * - 20 au hasard parmi les autres, d'abord ceux du lexique conseillé sur lequel on se concentre
+ *   (le plus bas niveau incomplet).
  * S'il y a moins de 50 mots récents, le hasard complète jusqu'à 70.
  */
 export async function pickReviews(userId: string): Promise<number[]> {
-  const words = await prisma.word.findMany({
-    where: { userId, entry: { b1Rank: { not: null } } },
-    select: { entryId: true, firstSeenAt: true, lastReviewedAt: true, origin: true, status: true },
-  });
+  const [words, { focus }] = await Promise.all([
+    prisma.word.findMany({
+      where: { userId, entry: { b1Rank: { not: null } } },
+      select: {
+        entryId: true,
+        firstSeenAt: true,
+        lastReviewedAt: true,
+        origin: true,
+        status: true,
+        entry: { select: { b1Rank: true, inA1Minimum: true, inB2Minimum: true } },
+      },
+    }),
+    lexiconCoverage(userId),
+  ]);
   const since = Date.now() - RECENT_DAYS * DAY_MS;
   const isRecent = (w: (typeof words)[number]) =>
     w.firstSeenAt.getTime() >= since && !((w.origin === "manual" || w.origin === "duolingo") && w.status === "KNOWN");
@@ -71,7 +82,9 @@ export async function pickReviews(userId: string): Promise<number[]> {
     .sort((a, b) => (a.lastReviewedAt?.getTime() ?? 0) - (b.lastReviewedAt?.getTime() ?? 0))
     .slice(0, RECENT_COUNT);
   const taken = new Set(recent.map((w) => w.entryId));
-  const others = shuffle(words.filter((w) => !taken.has(w.entryId))).slice(0, REVIEW_TOTAL - recent.length);
+  const rest = shuffle(words.filter((w) => !taken.has(w.entryId)));
+  const inFocus = (w: (typeof words)[number]) => (focus ? inList(focus, w.entry) : false);
+  const others = [...rest.filter(inFocus), ...rest.filter((w) => !inFocus(w))].slice(0, REVIEW_TOTAL - recent.length);
   return shuffle([...recent, ...others].map((w) => w.entryId));
 }
 
@@ -98,8 +111,10 @@ export async function remainingReviews(userId: string, lesson: { reviewIds: stri
   return cardsFor(userId, ids.filter((id) => !seen.has(id)));
 }
 
-/** Les prochains mots du parcours pour le texte d'une leçon : jamais rencontrés, et pas déjà
- * réservés par le texte d'une autre leçon du jour encore non lu. */
+/** Les prochains mots pour le texte d'une leçon : jamais rencontrés, pas déjà réservés par le
+ * texte d'une autre leçon du jour encore non lu, et pris dans le lexique conseillé du plus bas
+ * niveau incomplet (A1, puis A2, B1, B2), les plus fréquents d'abord : on comble le lexique A1
+ * même si le niveau A1 est déjà atteint en nombre de mots. */
 export async function reserveNewWords(userId: string): Promise<number[]> {
   const pending = await prisma.text.findMany({
     where: {
@@ -112,13 +127,19 @@ export async function reserveNewWords(userId: string): Promise<number[]> {
     select: { newEntryIds: true },
   });
   const reserved = pending.flatMap((t) => JSON.parse(t.newEntryIds!) as number[]);
-  const entries = await prisma.dictionaryEntry.findMany({
-    where: { b1Rank: { not: null }, words: { none: { userId } }, id: { notIn: reserved } },
-    orderBy: { b1Rank: "asc" },
-    take: NEW_PER_LESSON,
-    select: { id: true },
-  });
-  return entries.map((e) => e.id);
+  const picked: number[] = [];
+  for (const l of LEXICONS) {
+    if (picked.length >= NEW_PER_LESSON) break;
+    const entries = await prisma.dictionaryEntry.findMany({
+      where: { AND: [listWhere(l.list), { words: { none: { userId } } }, { id: { notIn: [...reserved, ...picked] } }] },
+      // Rang B1 = fréquence ; les mots hors lexique B1 (A1 ou B2 seuls) ensuite.
+      orderBy: [{ b1Rank: { sort: "asc", nulls: "last" } }, { id: "asc" }],
+      take: NEW_PER_LESSON - picked.length,
+      select: { id: true },
+    });
+    picked.push(...entries.map((e) => e.id));
+  }
+  return picked;
 }
 
 export interface LessonStatus {
