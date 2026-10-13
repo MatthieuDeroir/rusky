@@ -18,9 +18,8 @@ const fmtDate = (d: string) => fmtLong.format(new Date(d + "T12:00:00Z"));
 
 export default async function ProgressPage() {
   const userId = await currentUserId();
-  const [p, grid, act, settings, ladder, coverage, months] = await Promise.all([
+  const [p, act, settings, ladder, coverage, months] = await Promise.all([
     getProgress(userId),
-    lexiconGrid(userId),
     activity(userId),
     getSettings(userId),
     levelLadder(userId),
@@ -30,7 +29,10 @@ export default async function ProgressPage() {
   // Prochain niveau officiel (ni « − » ni « + ») : seuil tracé sur le graphique.
   const nextRung = ladder.find((r) => !/[+−]$/.test(r.code) && r.eta !== "atteint") ?? null;
   const focus = coverage.lexicons.find((l) => l.list === coverage.focus) ?? null;
-  const pct = Math.round((p.knownB1 / p.b1Total) * 100);
+  // Le tableau du haut suit le lexique du niveau en cours (A1, puis A2…), le dernier s'ils sont tous complets.
+  const shown = focus ?? coverage.lexicons[coverage.lexicons.length - 1];
+  const grid = await lexiconGrid(userId, shown.list);
+  const pct = Math.round((shown.known / shown.size) * 100);
 
   // Projection honnête : au rythme des 7 derniers jours, quand le lexique sera-t-il bouclé ?
   const pace = p.pacePerDay.toLocaleString("fr-FR", { maximumFractionDigits: 1 });
@@ -63,11 +65,12 @@ export default async function ProgressPage() {
         <h1 className="text-[32px] font-semibold">Progrès</h1>
         <div className="space-y-1">
           <p className="text-[56px] leading-none font-semibold tabular-nums">
-            {p.knownB1}
-            <span className="text-[24px] font-normal text-muted"> / {p.b1Total}</span>
+            {shown.known}
+            <span className="text-[24px] font-normal text-muted"> / {shown.size}</span>
           </p>
           <p className="text-muted">
-            mots du lexique B1 connus ({pct} %), {p.learningB1} en cours d’apprentissage
+            mots du {shown.label} connus ({pct} %), {shown.learning} en cours d’apprentissage. Niveau{" "}
+            <span className="font-semibold text-ink">{p.level.code}</span> avec {p.knownAll} mots connus en tout.
           </p>
         </div>
         <LexiconGrid states={grid.states} />
@@ -86,6 +89,7 @@ export default async function ProgressPage() {
           lexicons={coverage.lexicons}
           next={nextRung && { code: nextRung.code, need: nextRung.need }}
           steps={ladder.filter((r) => nextRung && r.need <= nextRung.need).map((r) => ({ code: r.code, need: r.need }))}
+          today={parisDay()}
         />
         {focus && (
           <p className="text-[17px]">

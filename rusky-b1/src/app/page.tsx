@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { currentUserId } from "@/lib/auth";
-import { getProgress } from "@/lib/learn";
+import { getProgress, lexiconCoverage } from "@/lib/learn";
 import { lessonsToday, NEW_PER_LESSON, REVIEW_TOTAL, suggestedSlot } from "@/lib/lessons";
 import { LinkButton } from "@/components/ui";
 import { LexiconBar } from "@/components/lexicon";
@@ -12,7 +12,9 @@ const fmtDay = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric
 
 export default async function TodayPage() {
   const userId = await currentUserId();
-  const [lessons, progress] = await Promise.all([lessonsToday(userId), getProgress(userId)]);
+  const [lessons, progress, coverage] = await Promise.all([lessonsToday(userId), getProgress(userId), lexiconCoverage(userId)]);
+  // Le lexique du niveau en cours (A1, puis A2…), le dernier s'ils sont tous complets.
+  const shown = coverage.lexicons.find((l) => l.list === coverage.focus) ?? coverage.lexicons[coverage.lexicons.length - 1];
   const next = suggestedSlot(lessons);
   const doneCount = lessons.filter((l) => l.done).length;
   const nextLesson = lessons.find((l) => l.slot === next);
@@ -85,14 +87,15 @@ export default async function TodayPage() {
 
       <section className="space-y-3">
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-[19px] font-semibold">Lexique B1</h2>
+          <h2 className="text-[19px] font-semibold first-letter:uppercase">{shown.label}</h2>
           <p className="text-muted tabular-nums">
-            <span className="font-semibold text-ink">{progress.knownB1}</span> / {progress.b1Total} connus
+            <span className="font-semibold text-ink">{shown.known}</span> / {shown.size} connus
           </p>
         </div>
-        <LexiconBar known={progress.knownB1} learning={progress.learningB1} total={progress.b1Total} />
+        <LexiconBar known={shown.known} learning={shown.learning} total={shown.size} />
         <p className="text-[15px] text-muted">
-          Niveau estimé <span className="font-semibold text-ink">{progress.level.code}</span>
+          Niveau estimé <span className="font-semibold text-ink">{progress.level.code}</span> ({progress.knownAll} mots
+          connus)
           {progress.level.next && progress.level.missing[0] ? `, pour ${progress.level.next} : encore ${progress.level.missing[0]}.` : "."}
         </p>
       </section>

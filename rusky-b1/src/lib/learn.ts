@@ -405,6 +405,8 @@ export interface LexiconCoverage {
   label: string;
   size: number;
   known: number;
+  /** Mots du lexique en cours d'apprentissage. */
+  learning: number;
 }
 
 /** Couverture des lexiques conseillés, et le lexique sur lequel se concentrer : le premier
@@ -412,16 +414,20 @@ export interface LexiconCoverage {
 export async function lexiconCoverage(userId: string): Promise<{ lexicons: LexiconCoverage[]; focus: LevelList | null }> {
   const [words, ...sizes] = await Promise.all([
     prisma.word.findMany({
-      where: { userId, status: "KNOWN" },
-      select: { entry: { select: { b1Rank: true, inA1Minimum: true, inB2Minimum: true } } },
+      where: { userId },
+      select: { status: true, entry: { select: { b1Rank: true, inA1Minimum: true, inB2Minimum: true } } },
     }),
     ...LEXICONS.map((l) => prisma.dictionaryEntry.count({ where: listWhere(l.list) })),
   ]);
-  const lexicons = LEXICONS.map((l, i) => ({
-    ...l,
-    size: sizes[i],
-    known: words.filter((w) => inList(l.list, w.entry)).length,
-  }));
+  const lexicons = LEXICONS.map((l, i) => {
+    const mine = words.filter((w) => inList(l.list, w.entry));
+    return {
+      ...l,
+      size: sizes[i],
+      known: mine.filter((w) => w.status === "KNOWN").length,
+      learning: mine.filter((w) => w.status !== "KNOWN").length,
+    };
+  });
   return { lexicons, focus: lexicons.find((l) => l.known < l.size)?.list ?? null };
 }
 
@@ -536,20 +542,18 @@ export function streakOf(daysDesc: string[]): number {
 }
 
 /** État de chaque mot du parcours B1, dans l'ordre : 0 à venir, 1 en cours, 2 connu. */
-export async function lexiconGrid(userId: string): Promise<{ ids: number[]; states: string }> {
-  const [entries, words] = await Promise.all([
-    prisma.dictionaryEntry.findMany({
-      where: { b1Rank: { not: null } },
-      orderBy: { b1Rank: "asc" },
-      select: { id: true },
-    }),
-    prisma.word.findMany({
-      where: { userId, entry: { b1Rank: { not: null } } },
-      select: { entryId: true, status: true },
-    }),
-  ]);
-  const st = new Map(words.map((w) => [w.entryId, w.status === "KNOWN" ? "2" : "1"]));
-  return { ids: entries.map((e) => e.id), states: entries.map((e) => st.get(e.id) ?? "0").join("") };
+/** État de chaque mot d'un lexique conseillé, des plus fréquents aux plus rares :
+ * 0 à venir, 1 en cours, 2 connu. */
+export async function lexiconGrid(userId: string, list: LevelList = "b1"): Promise<{ ids: number[]; states: string }> {
+  const entries = await prisma.dictionaryEntry.findMany({
+    where: listWhere(list),
+    orderBy: [{ b1Rank: { sort: "asc", nulls: "last" } }, { id: "asc" }],
+    select: { id: true, words: { where: { userId }, select: { status: true } } },
+  });
+  return {
+    ids: entries.map((e) => e.id),
+    states: entries.map((e) => (e.words[0] ? (e.words[0].status === "KNOWN" ? "2" : "1") : "0")).join(""),
+  };
 }
 
 export interface MonthPoint {
