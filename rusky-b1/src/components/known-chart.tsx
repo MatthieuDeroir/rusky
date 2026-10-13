@@ -87,17 +87,15 @@ export function KnownChart({
   const projections = series
     .filter((s) => shown.has(s.key) && s.cur < s.target && pace > 0)
     .map((s) => {
-      const vals: number[] = [];
-      for (let j = 1; j <= MAX_MONTHS; j++) {
-        const v = Math.min(s.target, s.cur + pace * (1 - frac + j - 1));
-        vals.push(v);
-        if (v >= s.target) break;
-      }
-      const reached = vals[vals.length - 1] >= s.target;
-      // Le premier point (fin du mois en cours) est confondu avec le dernier point réel.
-      return { ...s, vals, reached, doneMonth: addMonths(last.month, vals.length - 1) };
+      // À rythme constant, la projection est une droite : elle part d'aujourd'hui (dernier point
+      // réel) et s'arrête pile quand l'objectif est atteint (`months` mois plus tard).
+      const need = (s.target - s.cur) / pace;
+      const reached = need <= MAX_MONTHS;
+      const months = Math.min(need, MAX_MONTHS);
+      const end = reached ? s.target : s.cur + pace * months;
+      return { ...s, months, end, reached, doneMonth: addMonths(last.month, Math.floor(frac + months)) };
     });
-  const extra = Math.max(0, ...projections.map((p) => p.vals.length - 1));
+  const extra = Math.max(0, ...projections.map((p) => Math.ceil(p.months)));
   const cols = n + extra;
 
   const plotW = W - PAD.left - PAD.right;
@@ -115,8 +113,11 @@ export function KnownChart({
   const anchor = (i: number) => (i === 0 ? "start" : "middle");
   const line = (val: (p: MonthPoint) => number) =>
     points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(val(p)).toFixed(1)}`).join(" ");
-  const projPath = (p: (typeof projections)[number]) =>
-    [`M${x(n - 1).toFixed(1)},${y(p.cur).toFixed(1)}`, ...p.vals.slice(1).map((v, j) => `L${x(n + j).toFixed(1)},${y(v).toFixed(1)}`)].join(" ");
+  const projEnd = (p: (typeof projections)[number]) => ({ px: x(n - 1) + p.months * step, py: y(p.end) });
+  const projPath = (p: (typeof projections)[number]) => {
+    const { px, py } = projEnd(p);
+    return `M${x(n - 1).toFixed(1)},${y(p.cur).toFixed(1)} L${px.toFixed(1)},${py.toFixed(1)}`;
+  };
 
   // Étiquettes : au bout de la projection si elle est affichée, sinon au bout de la ligne réelle ;
   // écartées pour ne pas se chevaucher.
@@ -131,15 +132,33 @@ export function KnownChart({
             key: s.key,
             color: s.color,
             bold: s.key === "all",
-            ex: x(n - 1 + p.vals.length - 1) + 12,
-            ly: y(p.vals[p.vals.length - 1]),
+            ex: projEnd(p).px + 10,
+            ly: projEnd(p).py,
             text: `${s.code} ${p.reached ? "→" : "≥"} ${monthShort(p.doneMonth, true)}`,
           }
         : { key: s.key, color: s.color, bold: s.key === "all", ex: x(n - 1) + 14, ly: y(s.cur), text: label };
     })
-    .sort((a, b) => a.ex - b.ex || a.ly - b.ly);
-  for (let i = 1; i < ends.length; i++)
-    if (Math.abs(ends[i].ex - ends[i - 1].ex) < 1) ends[i].ly = Math.max(ends[i].ly, ends[i - 1].ly + LABEL_GAP);
+    .map((e) => {
+      // Largeur estimée du texte ; une étiquette trop à droite est ramenée dans le dessin.
+      const w = e.text.length * (e.bold ? 10 : 9);
+      return { ...e, w, ex: Math.min(e.ex, W - w - 2) };
+    })
+    .sort((a, b) => a.ly - b.ly);
+  // Anti-chevauchement : une étiquette qui recouvre (horizontalement et verticalement) une
+  // étiquette déjà placée descend sous elle.
+  const placed: typeof ends = [];
+  for (const e of ends) {
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (const o of placed)
+        if (e.ex < o.ex + o.w && o.ex < e.ex + e.w && Math.abs(e.ly - o.ly) < LABEL_GAP) {
+          e.ly = o.ly + LABEL_GAP;
+          moved = true;
+        }
+    }
+    placed.push(e);
+  }
 
   return (
     <figure className="space-y-3">
@@ -210,7 +229,7 @@ export function KnownChart({
           {projections.map((p) => (
             <g key={`p-${p.key}`}>
               <path d={projPath(p)} fill="none" stroke={p.color} strokeWidth={p.key === "all" ? 3.5 : 2.5} strokeDasharray="3 8" strokeLinecap="round" />
-              <circle cx={x(n - 1 + p.vals.length - 1)} cy={y(p.vals[p.vals.length - 1])} r="4.5" fill={p.color} />
+              <circle cx={projEnd(p).px} cy={projEnd(p).py} r="4.5" fill={p.color} />
             </g>
           ))}
           {/* Tous les mots : la ligne principale */}
