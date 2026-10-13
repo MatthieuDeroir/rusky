@@ -136,18 +136,23 @@ export function TriageDeck(props: { list: string; label: string; left: number; c
   );
 
   useEffect(() => {
-    // Flèches, et 4 / 6 du pavé numérique, verrou numérique allumé ou éteint (éteint, selon le
-    // navigateur, la touche arrive en « ArrowLeft », « Left » ou sans nom : on lit aussi son code).
+    // Flèches, et 4 / 6 du pavé numérique, verrou numérique allumé (« 4 », « 6 ») ou éteint
+    // (« ArrowLeft », « Left », parfois sans nom selon le système) : on lit le nom de la touche,
+    // sa position (code) et son ancien code numérique (37/39 flèches, 100/102 pavé).
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-      const right = ["ArrowRight", "Right", "6"].includes(e.key) || e.code === "Numpad6";
-      const left = ["ArrowLeft", "Left", "4"].includes(e.key) || e.code === "Numpad4";
+      const k = e.keyCode;
+      const right =
+        ["ArrowRight", "Right", "6"].includes(e.key) || e.code === "Numpad6" || k === 39 || k === 102;
+      const left = ["ArrowLeft", "Left", "4"].includes(e.key) || e.code === "Numpad4" || k === 37 || k === 100;
       if (!right && !left) return;
       e.preventDefault();
+      e.stopPropagation();
       answer(right);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Phase de capture : la touche est traitée avant tout autre élément de la page.
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   }, [answer]);
 
   const remaining = Math.max(0, left - stats.known - (skipped?.size ?? 0));
