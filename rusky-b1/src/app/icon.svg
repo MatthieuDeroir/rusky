@@ -1,5 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#3046E8"/>
-  <path fill="#fff" d="M150 112h146a100 100 0 0 1 0 200h-78v94h-68zm68 62v76h74a38 38 0 0 0 0-76z"/>
-  <rect x="330" y="334" width="72" height="72" rx="16" fill="#3CCF8E"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3F57F0"/>
+      <stop offset="1" stop-color="#2537C9"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- Р : jambage et boucle -->
+  <path fill="#fff" fill-rule="evenodd" d="M128 100h176a96 96 0 0 1 0 192H196v116h-68zM196 160v72h104a36 36 0 0 0 0-72z"/>
+  <!-- escalier qui monte vers la boucle : A1 → A2 → B1 -->
+  <path fill="#3CCF8E" d="M222 400v-24a8 8 0 0 1 8-8h50v-26a8 8 0 0 1 8-8h50v-26a8 8 0 0 1 8-8h40a8 8 0 0 1 8 8v92a8 8 0 0 1-8 8H230a8 8 0 0 1-8-8z"/>
 </svg>

@@ -10,10 +10,11 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#f6f7f9",
     theme_color: "#3046e8",
     lang: "fr",
+    // Nouveaux noms de fichiers : une PWA installée ne remplace son icône que si l'adresse change.
     icons: [
-      { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-      { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
-      { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: "/icons/rusky-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icons/rusky-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icons/rusky-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }

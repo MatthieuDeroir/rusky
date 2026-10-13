@@ -2,7 +2,7 @@
 // Ne met en cache QUE ce qui ne change jamais pour une URL donnée : le code et les styles de Next
 // (/_next/static/, noms uniques par version), les polices et les icônes. Les pages et les données
 // passent toujours par le réseau : jamais de contenu périmé, jamais de rechargement forcé.
-const CACHE = "rusky-static-v2";
+const CACHE = "rusky-static-v3";
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -46,8 +46,8 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(data.title, {
       body: data.body,
       tag: data.tag,
-      icon: "/icon-192.png",
-      badge: "/icon-192.png",
+      icon: "/icons/rusky-192.png",
+      badge: "/icons/rusky-192.png",
       data: { url: data.url },
     }),
   );
