@@ -350,14 +350,14 @@ export interface LevelDef {
   lexicon: LevelList | null;
 }
 
-/** Part du seuil qui donne le palier « − » (non officiel). */
+/** Part du chemin entre deux niveaux officiels qui donne le palier « − » (non officiel). */
 export const LEVEL_SHARE = 0.8;
 
 /** Seuils officiels de vocabulaire (tailles des lexiques minimums, éd. Zlatoust) : ТЭУ/A1 780,
  * ТБУ/A2 ~1 300, ТРКИ-1/B1 2 300 (ici 2 276, le lexique de l'app), ТРКИ-2/B2 ~5 100,
  * ТРКИ-3/C1 ~11 000 ; pas de lexique pour ТРКИ-4/C2 (20 000, règle « un niveau ≈ double le
- * vocabulaire » des mêmes auteurs). Non officiels, pour voir avancer : « − » à 80 % du seuil,
- * « + » à mi-chemin du « − » suivant. À l'examen, 66 % à chaque épreuve, d'où le seuil de lecture. */
+ * vocabulaire » des mêmes auteurs). Non officiels, pour voir avancer : « − » à 80 % du chemin
+ * depuis le niveau officiel précédent, « + » à mi-chemin du niveau officiel suivant. À l'examen, 66 % à chaque épreuve, d'où le seuil de lecture. */
 const OFFICIAL_LEVELS: LevelDef[] = [
   { code: "A1", need: 780, reading: 0, lexicon: "a1" },
   { code: "A2", need: 1300, reading: 0.66, lexicon: "a2" },
@@ -370,12 +370,14 @@ const OFFICIAL_LEVELS: LevelDef[] = [
 export const LEVELS: LevelDef[] = (() => {
   const out: LevelDef[] = [{ code: "pré-A1", need: 0, reading: 0, lexicon: "a1" }];
   OFFICIAL_LEVELS.forEach((l, i) => {
-    const prevReading = i ? OFFICIAL_LEVELS[i - 1].reading : 0;
-    out.push({ ...l, code: `${l.code}−`, need: Math.ceil(l.need * LEVEL_SHARE), reading: prevReading });
+    const prev = i ? OFFICIAL_LEVELS[i - 1] : null;
+    // « − » : 80 % du chemin depuis le niveau officiel précédent (0 avant A1).
+    const from = prev?.need ?? 0;
+    out.push({ ...l, code: `${l.code}−`, need: Math.round(from + (l.need - from) * LEVEL_SHARE), reading: prev?.reading ?? 0 });
     out.push(l);
+    // « + » : à mi-chemin du niveau officiel suivant.
     const next = OFFICIAL_LEVELS[i + 1];
-    if (next)
-      out.push({ ...l, code: `${l.code}+`, need: Math.round((l.need + Math.ceil(next.need * LEVEL_SHARE)) / 2) });
+    if (next) out.push({ ...l, code: `${l.code}+`, need: Math.round((l.need + next.need) / 2) });
   });
   return out;
 })();

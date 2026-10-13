@@ -50,7 +50,7 @@ export function LevelLadder({ rungs, lexicons }: { rungs: LevelRung[]; lexicons:
       </ol>
       <p className="text-[14px] text-faint">
         Le niveau se mesure sur tous tes mots connus : A1 780, A2 1 300, B1 2 276, B2 5 100, C1 11 000, C2 20 000 (tailles
-        des lexiques officiels du test). Étapes non officielles : « − » à 80 % du seuil, « + » à mi-chemin du « − » suivant.
+        des lexiques officiels du test). Étapes non officielles : « − » à 80 % du chemin depuis le niveau précédent, « + » à mi-chemin du niveau suivant.
         Sous chaque niveau, la part de son lexique conseillé (éd. Zlatoust ; pas de liste A2 trouvée : lexique A1 et mots
         les plus fréquents du B1). Les leçons comblent d’abord le lexique du plus bas niveau incomplet.
       </p>
