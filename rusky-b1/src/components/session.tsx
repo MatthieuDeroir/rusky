@@ -204,7 +204,8 @@ function ReviewDeck({
       <p className="text-[15px] text-muted">
         Encore {queue.length} sur {total}. Retrouve le sens, puis vérifie.
       </p>
-      <WordFace card={card} revealed={shown} />
+      {/* Une carte neuve par mot : sinon le sens du mot suivant s'affiche pendant le fondu de sortie. */}
+      <WordFace key={card.entryId} card={card} revealed={shown} />
       {!shown ? (
         <Button size="lg" className="w-full" onClick={() => setShown(true)}>
           Voir le sens
